@@ -1,99 +1,196 @@
 /*
- * Inline public Facebook Reels in the EXISTING Messenger conversation WKWebView.
- * Best-effort: private/restricted embeds may refuse playback. No video scraping.
- * Text links continue to open in the system default browser.
+ * Messenger Native - inline Facebook Reel controller v2.
+ * Inject at documentStart into the MAIN Messenger WKWebView.
+ * Captures Reel clicks before React can navigate, and exposes a native fallback.
+ * Uses Meta's public embed; never downloads or extracts protected video streams.
  */
 (() => {
-  if (window.__messengerNativeReelsInstalled) return;
-  window.__messengerNativeReelsInstalled = true;
+  if (window.__mnReelsInstalled) return;
+  window.__mnReelsInstalled = true;
 
-  const reelURL = (href) => {
+  const REEL_PATH = /^\/reels?\/(\d+)(?:\/|$)/i;
+  const REEL_IN_TEXT = /https?:\/\/(?:[a-z0-9-]+\.)?facebook\.com\/reels?\/\d+(?:\/?[^\s<>"']*)?/i;
+  let recentTarget = null;
+  let recentAt = 0;
+  let openPlayer = null;
+
+  function canonicalReel(input) {
     try {
-      let u = new URL(href, document.baseURI);
-      // Messenger often wraps outbound links in l.facebook.com / l.messenger.com.
-      if (['l.facebook.com', 'l.messenger.com'].includes(u.hostname.toLowerCase())) {
-        const raw = u.searchParams.get('u');
-        if (!raw) return null;
-        u = new URL(raw);
+      let u = new URL(input, document.baseURI);
+      for (let i = 0; i < 2; i++) {
+        const host = u.hostname.toLowerCase();
+        if (host !== 'l.facebook.com' && host !== 'l.messenger.com') break;
+        const redirect = u.searchParams.get('u');
+        if (!redirect) return null;
+        u = new URL(redirect);
       }
-      const h = u.hostname.toLowerCase();
-      if (!(h === 'facebook.com' || h.endsWith('.facebook.com'))) return null;
-      if (!/^\/(reel|reels)\/[^/?#]+/i.test(u.pathname)) return null;
-      return u;
+      if (!['http:', 'https:'].includes(u.protocol)) return null;
+      if (!['facebook.com', 'www.facebook.com', 'm.facebook.com'].includes(u.hostname.toLowerCase())) return null;
+      const match = u.pathname.match(REEL_PATH);
+      return match ? 'https://www.facebook.com/reel/' + match[1] + '/' : null;
     } catch (_) { return null; }
-  };
+  }
 
-  const mediaThumbnail = (target, anchor) => {
-    const image = target.closest('img, video, picture, [role="img"]');
-    return image && anchor.contains(image) && anchor.querySelector('img, video, picture');
-  };
+  function urlInText(text) {
+    if (!text || text.length > 1600) return null;
+    const match = text.match(REEL_IN_TEXT);
+    return match ? canonicalReel(match[0].replace(/[),.;]+$/, '')) : null;
+  }
 
-  function makePlayer(anchor, url) {
-    const player = document.createElement('div');
-    player.dataset.mnInlineReel = 'true';
-    player.setAttribute('role', 'group');
-    player.setAttribute('aria-label', 'Facebook Reel embedded player');
-    Object.assign(player.style, {
-      position: 'relative', width: 'min(100%, 340px)',
-      minWidth: '220px', maxWidth: '100%', aspectRatio: '9 / 16',
-      borderRadius: '12px', overflow: 'hidden', background: '#111',
-      display: 'block', margin: '4px 0'
+  function findClickedReel(target) {
+    if (!(target instanceof Element)) return null;
+    if (target.closest('[data-mn-reel-player], [contenteditable="true"], [role="textbox"]')) return null;
+
+    // Most common: a link around text, preview card, image or overlay button.
+    let node = target;
+    for (let depth = 0; node && depth < 7; depth++, node = node.parentElement) {
+      for (const key of ['href', 'data-href', 'data-url']) {
+        const raw = node.getAttribute && node.getAttribute(key);
+        const url = raw && canonicalReel(raw);
+        if (url) return { url, anchor: node };
+      }
+      // Messenger sometimes uses role=link and a child anchor as the URL target.
+      if (node.matches && node.matches('[role="link"], [role="button"]')) {
+        const links = node.querySelectorAll('a[href], [data-href], [data-url]');
+        for (const candidate of Array.from(links).slice(0, 12)) {
+          for (const attr of ['href', 'data-href', 'data-url']) {
+            const url = canonicalReel(candidate.getAttribute(attr) || '');
+            if (url) return { url, anchor: node };
+          }
+        }
+        const url = urlInText(node.textContent || '');
+        if (url) return { url, anchor: node };
+      }
+    }
+    // Plain Reel URL in a chat bubble, not represented by an <a>.
+    node = target;
+    for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+      const text = node.textContent || '';
+      const url = urlInText(text);
+      if (url) return { url, anchor: node };
+    }
+    return null;
+  }
+
+  function placePlayer(url, element) {
+    const canonical = canonicalReel(url);
+    if (!canonical || !document.body) return false;
+
+    if (openPlayer && openPlayer.isConnected) {
+      openPlayer.__mnClose && openPlayer.__mnClose();
+    }
+
+    let anchor = element instanceof Element && element.isConnected ? element : null;
+    if (!anchor && recentTarget instanceof Element && recentTarget.isConnected &&
+        Date.now() - recentAt < 6000) {
+      const candidate = findClickedReel(recentTarget);
+      anchor = (candidate && candidate.anchor) || recentTarget.closest('a, [role="link"], [role="button"], div');
+    }
+    if (!anchor) {
+      // Recovery for JS-generated window.open: locate the actual URL in the DOM.
+      const links = document.querySelectorAll('a[href], [data-href], [data-url]');
+      for (const candidate of Array.from(links).slice(-200)) {
+        const href = candidate.getAttribute('href') || candidate.getAttribute('data-href') || candidate.getAttribute('data-url');
+        if (canonicalReel(href || '') === canonical) { anchor = candidate; break; }
+      }
+    }
+    if (!anchor || !anchor.parentElement) return false;
+
+    const panel = document.createElement('div');
+    panel.dataset.mnReelPlayer = 'true';
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', 'Facebook Reel player');
+    Object.assign(panel.style, {
+      width: 'min(100%, 340px)', maxWidth: '100%', minWidth: '220px',
+      aspectRatio: '9 / 16', position: 'relative', display: 'block',
+      background: '#101010', borderRadius: '12px', overflow: 'hidden',
+      margin: '6px 0'
     });
 
-    const frame = document.createElement('iframe');
+    const iframe = document.createElement('iframe');
     const embed = new URL('https://www.facebook.com/plugins/video.php');
-    embed.searchParams.set('href', url.href);
+    embed.searchParams.set('href', canonical);
     embed.searchParams.set('show_text', '0');
     embed.searchParams.set('width', '340');
     embed.searchParams.set('autoplay', '1');
-    frame.src = embed.href;
-    frame.title = 'Facebook Reel';
-    frame.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
-    frame.setAttribute('allowfullscreen', '');
-    frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-    Object.assign(frame.style, { width: '100%', height: '100%', border: '0' });
+    iframe.src = embed.href;
+    iframe.title = 'Facebook Reel';
+    iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    Object.assign(iframe.style, { width: '100%', height: '100%', border: '0', display: 'block' });
 
-    const controls = document.createElement('div');
-    Object.assign(controls.style, {
-      position: 'absolute', zIndex: '2', inset: 'auto 0 0 0',
-      display: 'flex', justifyContent: 'space-between', gap: '8px',
-      padding: '8px', background: 'linear-gradient(transparent, rgba(0,0,0,.7))'
+    const footer = document.createElement('div');
+    Object.assign(footer.style, {
+      position: 'absolute', zIndex: '3', left: '0', right: '0', bottom: '0',
+      padding: '8px', display: 'flex', justifyContent: 'space-between',
+      gap: '8px', background: 'linear-gradient(transparent,rgba(0,0,0,.75))'
     });
-    const browser = document.createElement('a');
-    browser.href = url.href;
+    const browser = document.createElement('button');
+    browser.type = 'button';
     browser.textContent = 'Open in browser';
-    browser.style.cssText = 'font:12px system-ui;color:white;text-decoration:underline;';
+    browser.setAttribute('aria-label', 'Open Facebook Reel in default browser');
+    browser.style.cssText = 'font:12px system-ui;cursor:pointer;background:transparent;border:0;color:white;text-decoration:underline;';
+    browser.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.vmThongBao;
+      if (handler) handler.postMessage({ moNgoaiReel: canonical });
+    });
 
+    let hidden = false;
+    const isThumbnail = !!anchor.querySelector &&
+      !!anchor.querySelector('img, picture, video, [role="img"]');
+    if (isThumbnail && ['A', 'BUTTON'].includes(anchor.tagName)) {
+      anchor.style.display = 'none';
+      hidden = true;
+    }
     const close = document.createElement('button');
     close.type = 'button';
     close.textContent = '✕';
-    close.setAttribute('aria-label', 'Close Reel and restore thumbnail');
-    close.style.cssText = 'cursor:pointer;background:#333;color:white;border:0;border-radius:6px;padding:2px 8px;';
-    close.addEventListener('click', () => {
-      frame.src = 'about:blank';
-      player.remove();
-      anchor.style.display = '';
-    });
-
-    controls.append(browser, close);
-    player.append(frame, controls);
-    anchor.insertAdjacentElement('afterend', player);
-    anchor.style.display = 'none';
+    close.setAttribute('aria-label', 'Close Reel player');
+    close.style.cssText = 'font:16px system-ui;cursor:pointer;border:0;background:#444;color:white;border-radius:5px;padding:2px 8px;';
+    const restore = () => {
+      iframe.src = 'about:blank';
+      panel.remove();
+      if (hidden) anchor.style.display = '';
+      if (openPlayer === panel) openPlayer = null;
+    };
+    close.addEventListener('click', restore);
+    panel.__mnClose = restore;
+    footer.append(browser, close);
+    panel.append(iframe, footer);
+    anchor.insertAdjacentElement('afterend', panel);
+    openPlayer = panel;
+    return true;
   }
 
+  function rememberTarget(event) {
+    if (event.target instanceof Element) {
+      recentTarget = event.target;
+      recentAt = Date.now();
+    }
+  }
+
+  document.addEventListener('pointerdown', rememberTarget, true);
   document.addEventListener('click', (event) => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
-        event.shiftKey || event.altKey) return;
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const anchor = target.closest('a[href]');
-    if (!anchor || !mediaThumbnail(target, anchor)) return;
-    const reel = reelURL(anchor.href);
-    if (!reel) return;
-    // Do not interfere if Messenger already created a functional inline video.
-    if (anchor.querySelector('video[src], video source[src]')) return;
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+        event.ctrlKey || event.shiftKey || event.altKey) return;
+    rememberTarget(event);
+    const match = findClickedReel(event.target);
+    if (!match) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    makePlayer(anchor, reel);
+    placePlayer(match.url, match.anchor);
   }, true);
+
+  // Called by native navigation delegates when the Messenger SPA opens a
+  // Reel via window.open or programmatic navigation without a normal <a> click.
+  window.__mnOpenReelFromNative = (url) => placePlayer(url, null);
+  window.__mnCanonicalReel = canonicalReel; // Safari Web Inspector diagnostics.
+  window.__mnReelStatus = () => ({
+    installed: true,
+    playerVisible: !!(openPlayer && openPlayer.isConnected),
+    recentGesture: Date.now() - recentAt < 6000
+  });
 })();
