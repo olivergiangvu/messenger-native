@@ -44,6 +44,41 @@ open "$TMPDIR/messenger-native-build/Messenger Native.app"
 
 The GitHub macOS CI workflow also runs `node Tests/NotificationEngineTests.cjs`. Installing Node.js locally is optional and not needed to use the app.
 
+## Critical macOS permission fix (2026-11-04)
+
+If diagnostics show:
+
+- `Permission: Not requested`
+- `Alert style: 0`, `Sound allowed: no`
+- `Submitted: 0`, `Errors: 2`
+
+...then the native request is being **rejected before the system has recorded a permission choice**. The app is not merely hidden by Focus. Launching a test .app directly from `$TMPDIR` (typically `/var/folders/.../T/`) can cause `UNErrorDomain code 1` due to application registration/identity. This is an evidence-based likely cause; inspect the actual error domain and code before assuming this is the only cause.
+
+The supported development flow is now:
+
+```bash
+cd ~/messenger-native
+git fetch origin
+git switch feature/notification-nowplaying
+git pull --ff-only origin feature/notification-nowplaying
+bash build.sh
+bash install-local.sh
+```
+
+The installer verifies the code signature, copies the built app to **~/Applications/Messenger Native.app**, registers it using the system LaunchServices `lsregister`, and opens **that installed copy**. It does not reset cookies, remove user data or change the bundle ID. It does not require `sudo`.
+
+Do **not** open the development app directly from `$TMPDIR` while verifying notification permission. If an old instance is running, quit with ⌘Q before starting the installer.
+
+In the installed app, select **Xem → Request Notification Permission…**. Accept macOS's notification dialog if it appears, then select **Xem → Send Test Notification…**. Open **Xem → Notification Diagnostics…** and check:
+
+- Permission should be `Allowed` (or explicitly `DENIED` if rejected)
+- Installed path should be `/Users/<user>/Applications/Messenger Native.app`
+- `Submitted` should increase and `Last submission error` should be `none`
+
+If it still shows `Not requested`, the diagnostics now include **Last permission request** (error domain and numeric code) plus the last request-submission failure. A signed certificate may need to be configured if the ad-hoc signature is not accepted on the specific Mac configuration. Do not reset macOS notification databases or TCC arbitrarily.
+
+**Separate issue:** A status of `lastEvent: rows-no-chat-links` means the DOM fallback is presently unable to locate rendered conversation anchors. Once permission works, test real incoming messages while Messenger's chat list is visible. This is not evidence of an OS notification permission error and may require adjusting DOM selectors to the current Messenger UI.
+
 ## Check native notification permission first
 
 In Messenger Native:
