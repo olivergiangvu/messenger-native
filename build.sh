@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build Messenger Vdk (trước: Vduck Messenger) – chỉ arm64, ký bằng chứng chỉ Apple Development.
-# Cách dùng: bash build.sh [thư_mục_build]   (mặc định: $TMPDIR/vduck-messenger-build)
+# Build Messenger Native (trước: Vduck Messenger) – chỉ arm64, ký bằng chứng chỉ Apple Development.
+# Cách dùng: bash build.sh [thư_mục_build]   (mặc định: $TMPDIR/messenger-native-build)
 set -u
 GOC="$(cd "$(dirname "$0")" && pwd)/Ma nguon"
-B="${1:-${TMPDIR:-/tmp}/vduck-messenger-build}"
-APP="$B/Messenger Vdk.app"
+B="${1:-${TMPDIR:-/tmp}/messenger-native-build}"
+APP="$B/Messenger Native.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
