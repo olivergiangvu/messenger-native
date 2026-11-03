@@ -62,7 +62,11 @@ let jsThongBao = """
       this.data = tuyChon.data; this.onclick = null; this.onclose = null; this.onshow = null; this.onerror = null;
       this._id = 'vm-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       danhSach[this._id] = this;
-      guiSwift({ id: this._id, tieuDe: this.title, noiDung: this.body, tag: this.tag });
+      // Original page callbacks are short-lived; notification taps also carry
+      // a stable conversation path in native UNNotificationContent.userInfo.
+      setTimeout(() => { delete danhSach[this._id]; }, 15 * 60 * 1000);
+      guiSwift({ id: this._id, tieuDe: this.title, noiDung: this.body,
+                 tag: this.tag, duongDan: this.tag, nguon: 'web' });
     }
     close() { guiSwift({ dong: this._id }); delete danhSach[this._id]; }
     addEventListener(loai, ham) { if (loai === 'click') this.onclick = ham; if (loai === 'close') this.onclose = ham; }
@@ -96,47 +100,11 @@ let jsThongBao = """
       Object.entries(ton).map(([k, v]) => k + ' ' + v.toFixed(0) + 'ms').join(', ') });
     Object.keys(ton).forEach(k => ton[k] = 0); tuLuc = performance.now(); };
   setTimeout(() => { ghiTon(); setInterval(ghiTon, 300000); }, 60000);   // lần đầu sau 1 phút, rồi 5 phút/lần
-  const daBao = new Set();
-  const batDau = Date.now();
+  // Conversation snapshots and queued notifications are now handled by
+  // notification-engine.js (separate, testable module). Keep the helpers below
+  // for the independent incoming-call detector.
   const laGio = t => /^(\\d+\\s*(giây|phút|giờ|ngày|tuần|tháng|năm|[smhdwy])(\\s*(trước|ago))?|vừa xong|just now|\\d+\\s*thg\\s*\\d+.*|thứ\\s+\\S+|th\\s*\\d|cn)$/i.test(t);
   const laNhan = t => t === '·' || laGio(t) || /^(đang hoạt động|active now)$/i.test(t);
-  // Đọc từng ĐOẠN CHỮ THẬT trong dòng (text node) + độ đậm của chỗ chứa nó. Dò 03/11 09:19: tên / tin của dòng nhóm nằm
-  // trong phần tử có con (emoji, chữ lồng) → cách cũ "span không có con" bỏ sót cả dòng → tin nhóm không báo.
-  const doanChu = r => { const w = document.createTreeWalker(r, NodeFilter.SHOW_TEXT), ds = []; let n;
-    while ((n = w.nextNode())) { const t = n.textContent.trim(); if (t && n.parentElement) ds.push({ t, dam: parseInt(getComputedStyle(n.parentElement).fontWeight) >= 600 }); }
-    return ds; };
-  const dongChuaDoc = () => [...document.querySelectorAll('[role="row"]')].slice(0, 15).map(r => {
-    const a = r.querySelector('a[href*="/t/"]'); if (!a) return null;
-    const ds = doanChu(r).filter(d => !laNhan(d.t));
-    if (!ds.some(d => d.dam)) return null;
-    // Tên chat = dòng đầu của chữ trong link; tin = phần còn lại (nhóm: «Người gửi: nội dung»), bỏ chữ giờ / nhãn
-    const dong = (a.innerText || '').split('\\n').map(t => t.trim()).filter(t => t && !laNhan(t));
-    const ten = dong[0] || (ds[0] && ds[0].t) || 'Messenger';
-    const tin = (dong.length > 1 ? dong.slice(1) : ds.slice(1).map(d => d.t)).join(' ').replace(/:\\s+/, ': ').trim();
-    return { a, ten, tin: tin || 'Tin nhắn mới', khoa: a.getAttribute('href') + '|' + tin };
-  }).filter(Boolean);
-  // Anh đang nhìn app → NGHỈ (không quét, đỡ nặng – anh báo chậm 03/11); vừa rời app → quét 1 lượt chỉ để ghi nhớ.
-  let vuaNhin = true;
-  setInterval(() => tinhTon('dòng', () => {
-    if (/groupcall/.test(location.pathname)) return;
-    if (!document.hidden && document.hasFocus()) { vuaNhin = true; return; }
-    const ds = dongChuaDoc(); let moi = ds.filter(d => !daBao.has(d.khoa));
-    moi.forEach(d => daBao.add(d.khoa));
-    if (vuaNhin) { vuaNhin = false; return; }
-    if (Date.now() - batDau < 15000 || !moi.length) return;
-    // Cài đặt (Swift gửi window.__vmCaiDat): tắt báo tin → im; đang/vừa có bảng gọi (8 giây) → bỏ tin "đã bắt đầu / kết thúc
-    // cuộc gọi" (trùng bảng gọi, dò 09:33 có 5–6 thông báo), vẫn giữ "cuộc gọi nhỡ"
-    const cd = window.__vmCaiDat || {};
-    if (cd.baoTinNhan === false) return;
-    if (cd.boTinGoi !== false && Date.now() - (window.__vmGoiLuc || 0) < 8000)
-      moi = moi.filter(d => !/cuộc gọi|gọi video|gọi thoại|\\bcall/i.test(d.tin) || /nhỡ|bỏ lỡ|missed/i.test(d.tin));
-    if (!moi.length) { guiSwift({ nhatKy: 'DÒ TB: bỏ thông báo tin về cuộc gọi (đang có bảng gọi)' }); return; }
-    moi.slice(0, 3).forEach(d => {
-      const tb = new ThongBao(d.ten, { body: d.tin, tag: d.a.getAttribute('href') });
-      tb.onclick = () => d.a.click();
-    });
-    guiSwift({ nhatKy: 'TB tự tạo: ' + moi.length + ' tin mới' });
-  }), 2000);
 
   // VM_NHIP: 20 giây/lần ghi "trang còn chạy" kèm độ trễ hẹn giờ (kiểm Safari có hãm trang ẩn không)
   if (window.__vmNhip) { let truoc = Date.now(); setInterval(() => { const bay = Date.now();
@@ -147,7 +115,12 @@ let jsThongBao = """
   // Swift gọi hàm này khi anh bấm vào thông báo
   window.__vmBamThongBao = function (id) {
     const tb = danhSach[id];
-    if (tb && tb.onclick) tb.onclick({ target: tb, currentTarget: tb, preventDefault() {} });
+    if (tb && tb.onclick) {
+      tb.onclick({ target: tb, currentTarget: tb, preventDefault() {} });
+      delete danhSach[id];
+      return true;
+    }
+    return false;
   };
 
   // Số chưa đọc: messenger.com KHÔNG ghi số vào tiêu đề, mà gắn nhãn cho nút "Đoạn chat":
@@ -218,6 +191,15 @@ let jsThongBao = """
   const amDangPhat = new Set();   // âm thanh trang chính đang phát (để tắt chuông còn sót khi hộp gọi đến đóng)
   const phatGoc = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function () {
+    // Confirmed Messenger incoming-message chime. WebKit registers this very
+    // short audio as media playback, causing an unwanted Now Playing overlay.
+    // Do not block call ringtone, voice notes, video or Reel playback.
+    const path = String(this.currentSrc || this.src || '').split('?')[0].split('/').pop() || '';
+    if (this.tagName === 'AUDIO' && path === 'XFhtdTsftOC.ogg' &&
+        !/groupcall/.test(location.pathname)) {
+      guiSwift({ amBaoTinNhan: true });
+      return Promise.resolve();
+    }
     if (this.tagName === 'AUDIO' && !/groupcall/.test(location.pathname) && !amDangPhat.has(this)) {
       amDangPhat.add(this);
       const ten = String(this.currentSrc || this.src || '').split('?')[0].split('/').pop();
@@ -397,7 +379,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var window: NSWindow!
     var webView: WKWebView!
     var cuaSoPhu: [NSWindow] = []   // cửa sổ bật lên (vd. cuộc gọi video)
-    var webCuaThongBao: [String: WKWebView] = [:]   // id thông báo → trang đã tạo nó
+    let nativeNotifications = NativeNotificationCoordinator()
+    var suppressedWebChimes = 0
+    var lastPermissionRequestResult = "Not yet completed"
+    // We no longer retain WKWebView per notification. Conversation navigation
+    // is stored in the notification payload and survives a page reload.
     var daDoTim = false                             // chế độ dò VM_TIM chỉ chạy 1 lần mỗi lần mở app
     var bangPhim: NSWindow?                         // cửa sổ bảng phím tắt
     var oKhongHien: NSButton?                        // ô "Không hiện bảng này khi mở app"
@@ -447,17 +433,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSLog("VM: ĐO nhiệt máy đổi → %@", AppDelegate.tenNhiet())
         }
 
-        // Xin quyền gửi thông báo (macOS chỉ hỏi 1 lần đầu)
-        let trungTam = UNUserNotificationCenter.current()
-        trungTam.delegate = self
-        trungTam.requestAuthorization(options: [.alert, .sound, .badge]) { ok, loi in
-            NSLog("VM: quyền thông báo = %@ %@", ok ? "có" : "không", loi?.localizedDescription ?? "")
-            trungTam.getNotificationSettings { c in
-                let kieu = [UNAlertStyle.none: "KHÔNG HIỆN", .banner: "biểu ngữ", .alert: "cảnh báo (ở lại)"][c.alertStyle] ?? "?"
-                NSLog("VM: cài đặt thông báo macOS – kiểu=%@, âm thanh=%@, trung tâm thông báo=%@", kieu,
-                      c.soundSetting == .enabled ? "bật" : "tắt", c.notificationCenterSetting == .enabled ? "bật" : "tắt")
-            }
-        }
+        // Must be installed under a stable registered app path for reliable
+        // notification authorization. Running from $TMPDIR can fail with
+        // UNErrorDomain code 1 while remaining .notDetermined.
+        UNUserNotificationCenter.current().delegate = self
+        xinQuyenThongBao(hienKetQua: false)
 
         // Cấu hình nhân Safari
         let cauHinh = WKWebViewConfiguration()
@@ -480,6 +460,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             WKUserScript(source: jsCaiDat(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cauHinh.userContentController.addUserScript(
             WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        if let engineURL = Bundle.main.url(forResource: "notification-engine", withExtension: "js"),
+           let engine = try? String(contentsOf: engineURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: engine, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            NSLog("MN NOTI: NotificationEngine injected (%d bytes)", engine.utf8.count)
+        } else {
+            NSLog("MN NOTI ERROR: missing notification-engine.js")
+        }
 
         // Intercept at documentStart, before Messenger's React click handlers.
         // No extra WKWebView is created for a Reel thumbnail.
@@ -570,18 +558,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if let id = d["dong"] as? String {
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id]); return
         }
-        guard let id = d["id"] as? String else { return }
-        webCuaThongBao[id] = message.webView
-
-        let nd = UNMutableNotificationContent()
-        nd.title = d["tieuDe"] as? String ?? "Messenger"
-        nd.body = d["noiDung"] as? String ?? ""
-        nd.sound = .default
-        if let tag = d["tag"] as? String, !tag.isEmpty { nd.threadIdentifier = tag }   // gom theo cuộc trò chuyện
-        NSLog("VM: thông báo mới (không ghi nội dung)")
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: nd, trigger: nil)) { loi in
-            if let loi { NSLog("VM: lỗi gửi thông báo %@", loi.localizedDescription) }
+        if d["amBaoTinNhan"] as? Bool == true {
+            suppressedWebChimes += 1
+            // A tiny AppKit sound does not create WebKit media sessions.
+            // Background audio is supplied by macOS notification sound to
+            // respect Focus, per-app sound settings and quiet hours.
+            if NSApp.isActive && caiDat("baoTinNhan", true) {
+                _ = NSSound(named: NSSound.Name("Tink"))?.play()
+            }
+            return
         }
+        guard d["id"] is String else { return }
+        guard caiDat("baoTinNhan", true) else { return }
+        nativeNotifications.deliver(d)
     }
 
     // App đang mở ở trước vẫn hiện thông báo (giống Messenger chính chủ)
@@ -590,16 +579,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         xong([.banner, .sound, .list])
     }
 
+    private func jsonStringForJavaScript(_ string: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: string, options: [.fragmentsAllowed]),
+              let result = String(data: data, encoding: .utf8) else { return "\"\"" }
+        return result
+    }
+
     // Anh bấm vào thông báo → đưa cửa sổ lên + báo cho trang để nó mở đúng cuộc trò chuyện
     func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse,
                                 withCompletionHandler xong: @escaping () -> Void) {
         let id = r.notification.request.identifier
+        let path = r.notification.request.content.userInfo["mnConversationPath"] as? String ?? ""
         DispatchQueue.main.async {
-            let wv = self.webCuaThongBao.removeValue(forKey: id) ?? self.webView!
             NSApp.activate(ignoringOtherApps: true)
-            wv.window?.makeKeyAndOrderFront(nil)
-            wv.evaluateJavaScript("window.__vmBamThongBao && window.__vmBamThongBao('\(id)')")
-            xong()
+            self.webView.window?.makeKeyAndOrderFront(nil)
+            // Prefer the page's original onclick for new Notification(...).
+            // Otherwise click a currently visible conversation, or navigate
+            // directly using the stable path retained in userInfo.
+            let escapedID = self.jsonStringForJavaScript(id)
+            let escapedPath = self.jsonStringForJavaScript(path)
+            let javascript = """
+            (function () {
+              if (window.__vmBamThongBao && window.__vmBamThongBao(\(escapedID))) return true;
+              const path = \(escapedPath);
+              if (!/^\\/t\\/[^/]+/.test(path)) return false;
+              const link = Array.from(document.querySelectorAll('a[href*="/t/"]')).find(a => {
+                try { return new URL(a.href, location.href).pathname === path; } catch (_) { return false; }
+              });
+              if (link) { link.click(); return true; }
+              location.href = 'https://www.messenger.com' + path;
+              return true;
+            })()
+            """
+            self.webView.evaluateJavaScript(javascript) { _, error in
+                if let error { NSLog("MN NOTI: open conversation failed (%@)", error.localizedDescription) }
+                xong()
+            }
         }
     }
 
@@ -1324,6 +1339,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSLog("VM: hiệu ứng phóng to = %@", ma)
     }
 
+    func xinQuyenThongBao(hienKetQua: Bool) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] allowed, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let error {
+                    let details = error as NSError
+                    self.lastPermissionRequestResult = "\(details.domain) code \(details.code): \(error.localizedDescription)"
+                } else {
+                    self.lastPermissionRequestResult = allowed ? "Authorized" : "Not authorized"
+                }
+                NSLog("MN NOTI: requestAuthorization result: %@", self.lastPermissionRequestResult)
+                if hienKetQua {
+                    let alert = NSAlert()
+                    alert.messageText = allowed ? "Đã cấp quyền thông báo" : "Chưa thể cấp quyền thông báo"
+                    let installHint = Bundle.main.bundlePath.hasPrefix("/var/folders/")
+                        ? "\nỨng dụng đang chạy từ thư mục tạm. Chạy bash install-local.sh để cài vào ~/Applications, sau đó xin quyền lại."
+                        : "\nVào System Settings → Notifications → Messenger Native để kiểm tra quyền."
+                    alert.informativeText = self.lastPermissionRequestResult + (allowed ? "" : installHint)
+                    alert.addButton(withTitle: "Đóng")
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
+    @objc func xinQuyenThongBaoTuMenu() {
+        xinQuyenThongBao(hienKetQua: true)
+    }
+
+    @objc func thuThongBaoNative() {
+        nativeNotifications.sendTest()
+    }
+
+    @objc func chanDoanThongBao() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                let script = "JSON.stringify(window.__mnNotificationStatus ? window.__mnNotificationStatus() : {installed:false})"
+                self.webView.evaluateJavaScript(script) { value, error in
+                    let permission: String
+                    switch settings.authorizationStatus {
+                    case .authorized: permission = "Allowed"
+                    case .provisional: permission = "Provisional"
+                    case .denied: permission = "DENIED"
+                    case .notDetermined: permission = "Not requested"
+                    @unknown default: permission = "Unknown / ephemeral"
+                    }
+                    let engine = (value as? String) ?? "Engine unavailable: \(error?.localizedDescription ?? "unknown")"
+                    let alert = NSAlert()
+                    alert.messageText = "Notification Diagnostics"
+                    alert.informativeText = """
+                    Permission: \(permission)
+                    Last permission request: \(self.lastPermissionRequestResult)
+                    Bundle ID: \(Bundle.main.bundleIdentifier ?? "?")
+                    Installed path: \(Bundle.main.bundlePath)
+                    Alert style: \(settings.alertStyle.rawValue)
+                    Sound allowed: \(settings.soundSetting == .enabled ? "yes" : "no")
+                    Previews: \(settings.showPreviewsSetting == .always ? "Always" : settings.showPreviewsSetting == .whenAuthenticated ? "When unlocked" : "Never")
+                    Notification Center: \(settings.notificationCenterSetting == .enabled ? "yes" : "no")
+                    Web message chimes blocked: \(self.suppressedWebChimes)
+                    \(self.nativeNotifications.status)
+
+                    NotificationEngine: \(engine)
+
+                    A successful submission does not guarantee a banner:
+                    macOS Focus and per-app notification settings still apply.
+                    """
+                    alert.addButton(withTitle: "Đóng")
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
     @objc func chanDoanReel() {
         // Read from the exact WKWebView currently serving Messenger.
         let script = "JSON.stringify(window.__mnReelStatus ? window.__mnReelStatus() : {installed:false})"
@@ -1398,6 +1489,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             .separator(),
             muc("Công cụ soi trang (DevTools)", #selector(moDevTools), "i", self, [.command, .option]),
             muc("Reel Diagnostics…", #selector(chanDoanReel), "", self),
+            .separator(),
+            muc("Notification Diagnostics…", #selector(chanDoanThongBao), "", self),
+            muc("Request Notification Permission…", #selector(xinQuyenThongBaoTuMenu), "", self),
+            muc("Send Test Notification…", #selector(thuThongBaoNative), "", self),
         ])
         them("Đoạn chat", [muc("Tin nhắn mới", #selector(tinNhanMoi), "n", self), .separator()]
             + (1...9).map { n in
