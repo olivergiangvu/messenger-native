@@ -102,3 +102,31 @@ window.__mnCanonicalReel('https://www.facebook.com/reel/2043484703034878')
 If __mnReelStatus is missing, an older app build may be running or the script was not injected. On startup, the app should log MN REEL: injected controller. If the inline player appears but cannot play, inspect Meta embed eligibility and WKWebView frame/CSP errors first.
 
 The controller never extracts private video streams. Active Reel playback may legitimately register in macOS Now Playing; the separately prioritized bug concerns incoming-message notification sounds.
+
+
+## Diagnostic build update (2026-11-04)
+
+Reported behavior:
+- https://www.facebook.com/share/v/1JEMeWpjVL/ already plays inside the Messenger chat.
+- Two numeric /reel/<id> links still open externally.
+
+The working share/v example is **not** an instruction to rewrite numeric Reel IDs into share/v short links; these are distinct URL forms and their relation cannot be derived from the digits alone. Preserve Messenger's existing inline player when available.
+
+### Important: quit the previous build first
+
+The fork contains an explicit single-instance guard at the bottom of main.swift. When an older Messenger Native process is already running, launching with \`open -n\` creates a second process that activates the **old** process and exits. Building a fresh .app on disk does not upgrade a running process.
+
+Quit Messenger Native using Command-Q, then build and launch the new version. Do not use \`open -n\` during regression testing.
+
+### Built-in diagnostics
+
+The View / Xem menu now has **Reel Diagnostics…**. Use it while the Messenger main window is open:
+
+1. After launch, open Reel Diagnostics. Expected: installed=true and version=2.1-diagnostics.
+2. Click one numeric Reel link in Messenger, then open Reel Diagnostics again.
+3. Report seenClicks, matchedClicks, lastAction, and playerVisible; this distinguishes injection/DOM click issues from Meta embed or routing issues.
+4. If the menu is absent, the old binary is almost certainly still running.
+
+Node.js is an optional local JavaScript test tool and is **not** required by Messenger Native. JavaScript such as window.__mnReelStatus() belongs in Safari Web Inspector's JavaScript console, **not** the macOS Terminal.
+
+No private chat content or complete clicked URL is included in the diagnostic status.
