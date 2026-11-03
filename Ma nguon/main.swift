@@ -1324,6 +1324,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSLog("VM: hiệu ứng phóng to = %@", ma)
     }
 
+    @objc func chanDoanReel() {
+        // Read from the exact WKWebView currently serving Messenger.
+        let script = "JSON.stringify(window.__mnReelStatus ? window.__mnReelStatus() : {installed:false})"
+        webView.evaluateJavaScript(script) { result, error in
+            let alert = NSAlert()
+            alert.messageText = "Reel Diagnostics"
+            alert.alertStyle = .informational
+            if let error {
+                alert.informativeText = "Không thể đọc script: \(error.localizedDescription)"
+            } else {
+                alert.informativeText = (result as? String) ?? "Không nhận được trạng thái."
+            }
+            alert.addButton(withTitle: "Đóng")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
     func taoMenu() {
         let menuChinh = NSMenu()
 
@@ -1379,6 +1397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             muc("Toàn màn hình", #selector(NSWindow.toggleFullScreen(_:)), "f", nil, [.command, .control]),
             .separator(),
             muc("Công cụ soi trang (DevTools)", #selector(moDevTools), "i", self, [.command, .option]),
+            muc("Reel Diagnostics…", #selector(chanDoanReel), "", self),
         ])
         them("Đoạn chat", [muc("Tin nhắn mới", #selector(tinNhanMoi), "n", self), .separator()]
             + (1...9).map { n in
