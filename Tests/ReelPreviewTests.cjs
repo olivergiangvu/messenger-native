@@ -82,8 +82,9 @@ browserButton.listeners.click({ preventDefault() {}, stopPropagation() {} });
 assert.equal(messages.length, 1);
 assert.equal(messages[0].moNgoaiReel, first + '/');
 
+// Native recovery reuses the last clicked Reel anchor when React calls window.open.
+assert.equal(window.__mnOpenReelFromNative(first), true);
+
 const ordinaryPost = new FakeElement('a', { href: 'https://www.facebook.com/person/posts/123' });
 assert.deepEqual(click(ordinaryPost), { canceled: false, stopped: false });
-
-assert.equal(window.__mnOpenReelFromNative(second), true);
 console.log('Reel inline preview: URL, redirect, click, player, native fallback and browser button tests passed.');
