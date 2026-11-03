@@ -9,7 +9,13 @@
 
   const reelURL = (href) => {
     try {
-      const u = new URL(href, document.baseURI);
+      let u = new URL(href, document.baseURI);
+      // Messenger often wraps outbound links in l.facebook.com / l.messenger.com.
+      if (['l.facebook.com', 'l.messenger.com'].includes(u.hostname.toLowerCase())) {
+        const raw = u.searchParams.get('u');
+        if (!raw) return null;
+        u = new URL(raw);
+      }
       const h = u.hostname.toLowerCase();
       if (!(h === 'facebook.com' || h.endsWith('.facebook.com'))) return null;
       if (!/^\/(reel|reels)\/[^/?#]+/i.test(u.pathname)) return null;
