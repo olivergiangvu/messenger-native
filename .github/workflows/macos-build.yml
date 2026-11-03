@@ -1,0 +1,33 @@
+name: macOS Build and Regression Tests
+
+on:
+  push:
+    branches:
+      - feature/notification-nowplaying
+  pull_request:
+    branches:
+      - develop
+      - feature/link-routing-reels
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Routing regression
+        run: |
+          swiftc "Ma nguon/LinkRouting.swift" "Tests/LinkRoutingTests.swift" -o /tmp/mn-routing-tests
+          /tmp/mn-routing-tests
+      - name: WebView JavaScript regression
+        run: |
+          node Tests/ReelPreviewTests.cjs
+          node Tests/NotificationEngineTests.cjs
+      - name: Build unsigned test application (ad hoc)
+        env:
+          KY_APP: "-"
+        run: |
+          bash build.sh "$RUNNER_TEMP/messenger-native-ci"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-engine.js"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/reel-preview.js"
