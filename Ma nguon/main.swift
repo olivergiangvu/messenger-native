@@ -481,6 +481,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         cauHinh.userContentController.addUserScript(
             WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
+        // Experimental: public Facebook Reel thumbnails can play inside the original chat.
+        // This injects into the existing main WKWebView, not an extra browser window.
+        if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
+           let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: reelSource, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
+
         cauHinh.userContentController.add(self, name: "vmThongBao")
         // Giữ đăng nhập: theo dõi cookie để đổi cookie phiên thành cookie 1 năm
         cauHinh.websiteDataStore.httpCookieStore.add(self)
@@ -605,8 +613,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if let that = linkThat(url) {
             NSWorkspace.shared.open(that); return decisionHandler(.cancel)
         }
-        if laTrongApp(url) { decisionHandler(.allow) }
-        else { NSWorkspace.shared.open(url); decisionHandler(.cancel) }
+        if LinkRouting.openInBrowser(url, userActivated: action.navigationType == .linkActivated, newWindow: false) {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+        } else {
+            decisionHandler(.allow)
+        }
     }
 
     // MARK: Tải file / lưu ảnh → thư mục Tải về (nhân Safari KHÔNG tự tải như Chrome của bản gốc)
@@ -1072,7 +1084,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
         if let that = linkThat(url) { NSWorkspace.shared.open(that); return nil }
-        if !laTrongApp(url) { NSWorkspace.shared.open(url); return nil }
+        if LinkRouting.openInBrowser(url, userActivated: action.navigationType == .linkActivated, newWindow: true) {
+            NSWorkspace.shared.open(url)
+            return nil
+        }
         // Bấm "Tải xuống" file đính kèm → Messenger mở link file (fbsbx/fbcdn) trong cửa sổ mới → tải thẳng về
         if let h = url.host, h.hasSuffix("fbsbx.com") || h.hasSuffix("fbcdn.net") {
             webView.startDownload(using: action.request) { [weak self] d in d.delegate = self; self?.dangTai.append(d) }
