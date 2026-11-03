@@ -42,3 +42,14 @@ swiftc 'Ma nguon/LinkRouting.swift' 'Tests/LinkRoutingTests.swift' -o /tmp/messe
 - The existing `about:blank` new-window behavior is not fully redesigned here, to avoid breaking the call flow without end-to-end tests.
 
 This work is based on the `v0.6.1` MIT-licensed code. The upstream attribution/license must be retained.
+
+## Independent fork identity
+
+This feature branch also changes the test app to **Messenger Native.app** with bundle ID
+`com.olivergiangvu.messengernative`, fork version `0.1.0`, and the update repository
+`olivergiangvu/messenger-native`. This prevents replacing the original Messenger Vdk app.
+A different bundle ID has its own WebKit storage; logging in again is expected.
+
+Do not use in-app updates until a new independent release-signing key and signed
+fork release pipeline are configured. The original embedded verification key is
+not a release key for this fork.
