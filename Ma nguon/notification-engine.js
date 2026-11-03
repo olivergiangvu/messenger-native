@@ -9,6 +9,7 @@
  */
 (() => {
   if (window.__mnNotificationEngine) return;
+  window.__mnNotificationEngine = true;
   const bridge = window.webkit && window.webkit.messageHandlers &&
                  window.webkit.messageHandlers.vmThongBao;
   const send = (payload) => { if (bridge) bridge.postMessage(payload); };
