@@ -1359,8 +1359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     case .provisional: permission = "Provisional"
                     case .denied: permission = "DENIED"
                     case .notDetermined: permission = "Not requested"
-                    case .ephemeral: permission = "Ephemeral"
-                    @unknown default: permission = "Unknown"
+                    @unknown default: permission = "Unknown / ephemeral"
                     }
                     let engine = (value as? String) ?? "Engine unavailable: \(error?.localizedDescription ?? "unknown")"
                     let alert = NSAlert()
