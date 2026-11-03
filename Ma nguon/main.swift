@@ -481,12 +481,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         cauHinh.userContentController.addUserScript(
             WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
-        // Experimental: public Facebook Reel thumbnails can play inside the original chat.
-        // This injects into the existing main WKWebView, not an extra browser window.
+        // Intercept at documentStart, before Messenger's React click handlers.
+        // No extra WKWebView is created for a Reel thumbnail.
         if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
            let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
             cauHinh.userContentController.addUserScript(
-                WKUserScript(source: reelSource, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+                WKUserScript(source: reelSource, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            NSLog("MN REEL: injected controller (%d UTF-8 bytes)", reelSource.utf8.count)
+        } else {
+            NSLog("MN REEL ERROR: missing reel-preview.js from app bundle")
         }
 
         cauHinh.userContentController.add(self, name: "vmThongBao")
@@ -541,6 +544,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let d = message.body as? [String: Any] else { return }
+        if let raw = d["moNgoaiReel"] as? String,
+           let url = URL(string: raw),
+           let reel = LinkRouting.canonicalReel(url),
+           message.webView == webView {
+            NSWorkspace.shared.open(reel)
+            return
+        }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
             if goiDen == nil, !NSApp.isActive, caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }   // chỉ cuộc gọi mới nảy Dock
@@ -604,11 +614,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: Điều hướng – link trong app hay mở ra trình duyệt
 
+    /// Fallback for React-driven navigation/window.open which bypasses the
+    /// document's anchor click handler. We never spawn a Reel WKWebView.
+    private func moReelTrongHoiThoai(_ url: URL, trong trang: WKWebView) {
+        guard let reel = LinkRouting.canonicalReel(url),
+              let encoded = try? JSONSerialization.data(withJSONObject: reel.absoluteString,
+                                                         options: [.fragmentsAllowed]),
+              let quoted = String(data: encoded, encoding: .utf8) else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        let script = "Boolean(window.__mnOpenReelFromNative && window.__mnOpenReelFromNative(\(quoted)))"
+        trang.evaluateJavaScript(script) { result, error in
+            if let error {
+                NSLog("MN REEL: native fallback failed: %@", error.localizedDescription)
+            }
+            if result as? Bool != true {
+                // Script missing, no identifiable chat anchor, or injection blocked.
+                // Respect the user's click rather than silently losing it.
+                NSLog("MN REEL: no inline target; opening default browser")
+                NSWorkspace.shared.open(reel)
+            } else {
+                NSLog("MN REEL: inline player inserted via native fallback")
+            }
+        }
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if action.shouldPerformDownload { return decisionHandler(.download) }   // <a download>, blob, "Tải ảnh xuống"
         guard let url = action.request.url, action.targetFrame?.isMainFrame != false else {
             return decisionHandler(.allow)             // khung con (iframe) → để trang tự lo
+        }
+        let target = linkThat(url) ?? url
+        // Only user navigation from the main conversation frame, never
+        // navigation inside the actual embedded Facebook video iframe.
+        if webView == self.webView && action.sourceFrame.isMainFrame,
+           LinkRouting.isReel(target) {
+            moReelTrongHoiThoai(target, trong: webView)
+            return decisionHandler(.cancel)
         }
         if let that = linkThat(url) {
             NSWorkspace.shared.open(that); return decisionHandler(.cancel)
@@ -1083,6 +1127,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
+        let target = linkThat(url) ?? url
+        if webView == self.webView && action.sourceFrame.isMainFrame,
+           LinkRouting.isReel(target) {
+            moReelTrongHoiThoai(target, trong: webView)
+            return nil
+        }
         if let that = linkThat(url) { NSWorkspace.shared.open(that); return nil }
         if LinkRouting.openInBrowser(url, userActivated: action.navigationType == .linkActivated, newWindow: true) {
             NSWorkspace.shared.open(url)
