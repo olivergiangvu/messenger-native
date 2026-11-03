@@ -1,4 +1,4 @@
-// Messenger Vdk (trước: Vduck Messenger, đổi tên 03/11) – bản clone học tập của MessengerApp
+// Messenger Native (trước: Vduck Messenger, đổi tên 03/11) – bản clone học tập của MessengerApp
 // Học theo app "MessengerApp" của Stefan (MIT, github.com/stefanminch/messenger-mac),
 // nhưng viết lại bằng Swift + WKWebView (nhân Safari) thay cho Electron (nhân Chrome).
 //
@@ -1782,15 +1782,15 @@ extension AppDelegate {
 
 // MARK: Cài đặt (⌘,) – 4 tab: Thông báo · Cuộc gọi · Tải file · Chung (anh duyệt trang xem thử 03/11, bỏ phần Cập nhật – làm sau)
 let ngayPhatHanh = "03/11/2026"
-let tenApp = "Messenger Vdk"           // tên app (anh chốt 03/11; trước: Vduck Messenger → Messenger → Messenger AppD)
+let tenApp = "Messenger Native"           // tên app (anh chốt 03/11; trước: Vduck Messenger → Messenger → Messenger AppD)
 let coGiMoi = """
 0.6.1 – 03/11/2026
-• Cập nhật ngay trong app: Cài đặt → Chung → Kiểm tra cập nhật (hoặc menu Messenger Vdk). Bản mới được kiểm chữ ký số rồi tự cài, mở lại – không phải bấm «Vẫn mở» lại
+• Cập nhật ngay trong app: Cài đặt → Chung → Kiểm tra cập nhật (hoặc menu Messenger Native). Bản mới được kiểm chữ ký số rồi tự cài, mở lại – không phải bấm «Vẫn mở» lại
 • Nút «Đăng xuất và xoá dữ liệu» (Cài đặt → Chung) cho máy dùng chung
 • DMG mới có ảnh nền + hướng dẫn mở lần đầu
 
 0.6.0 – 03/11/2026
-• Đổi tên thành Messenger Vdk, thêm cửa sổ Cài đặt (⌘,)
+• Đổi tên thành Messenger Native, thêm cửa sổ Cài đặt (⌘,)
 • Thông báo tin nhắn khi ở app khác (cả tin nhóm), Dock chỉ nảy khi có cuộc gọi
 • Bảng nổi cuộc gọi đến: phân biệt gọi thoại / video / gọi nhóm (kèm tên nhóm), bấm Từ chối / Chấp nhận ngay trên bảng
 • Gác máy là tắt chuông
@@ -2083,7 +2083,7 @@ extension AppDelegate {
 // bằng khoá công khai gắn sẵn (khoá bí mật chỉ nằm trong Keychain máy anh, xem phat-hanh/khoa.swift) → thay app → mở lại.
 // File do app tự tải không bị gắn dấu "tải từ Internet" → người dùng không phải bấm "Vẫn mở" lại.
 let khoaCongKhaiCapNhat = "t62Zb9HEl8O9BqefxiJHXaYkRCJmxNyoMnNC9OJ1YH0="
-let khoGitHub = "Vduck141/messenger-vdk"
+let khoGitHub = "olivergiangvu/messenger-native"
 
 struct BanPhatHanh { let ban: String; let ghiChu: String; let zip: URL?; let sig: URL?; let trang: URL }
 enum LoiCapNhat: LocalizedError {
@@ -2112,7 +2112,7 @@ extension AppDelegate {
             UserDefaults.standard.removeObject(forKey: "vuaCapNhatTu")
             NSLog("VM: CẬP NHẬT xong %@ → %@", tu, banHienTai)
             trangThaiCapNhat = "Đã cập nhật lên \(banHienTai)"
-            let nd = UNMutableNotificationContent(); nd.title = "Đã cập nhật Messenger Vdk \(banHienTai)"; nd.body = "Từ bản \(tu). Đăng nhập và cài đặt giữ nguyên."
+            let nd = UNMutableNotificationContent(); nd.title = "Đã cập nhật Messenger Native \(banHienTai)"; nd.body = "Từ bản \(tu). Đăng nhập và cài đặt giữ nguyên."
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "capnhat", content: nd, trigger: nil))
         }
         // Không tự hỏi GitHub (anh chốt 03/11: người dùng tự bấm «Kiểm tra cập nhật» trong Cài đặt / menu).
@@ -2173,7 +2173,7 @@ extension AppDelegate {
             NSLog("VM: CẬP NHẬT – mới nhất %@, đang dùng %@", b.ban, banHienTai)
             if soSanhBan(b.ban, banHienTai) <= 0 {
                 self.trangThaiCapNhat = "Đang dùng bản mới nhất (\(banHienTai))"
-                if !imLang { self.baoCapNhat("Bạn đang dùng bản mới nhất", "Messenger Vdk \(banHienTai).") }
+                if !imLang { self.baoCapNhat("Bạn đang dùng bản mới nhất", "Messenger Native \(banHienTai).") }
                 return
             }
             self.trangThaiCapNhat = "Có bản mới \(b.ban)"
@@ -2188,7 +2188,7 @@ extension AppDelegate {
         // Ghi chú Release (Markdown) → chữ thường, tối đa 14 dòng
         let ghi = b.ghiChu.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "#", with: "")
             .split(separator: "\n", omittingEmptySubsequences: true).prefix(14).joined(separator: "\n")
-        let a = NSAlert(); a.messageText = "Có bản Messenger Vdk \(b.ban)"
+        let a = NSAlert(); a.messageText = "Có bản Messenger Native \(b.ban)"
         a.informativeText = "Bạn đang dùng \(banHienTai).\n\n\(ghi)"
         let tuCai = b.zip != nil && b.sig != nil
         a.addButton(withTitle: tuCai ? "Cập nhật ngay" : "Mở trang tải"); a.addButton(withTitle: "Để sau")
@@ -2208,7 +2208,7 @@ extension AppDelegate {
         let cho = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 90), styleMask: [.titled], backing: .buffered, defer: false)
         cho.title = "Đang cập nhật"
         let quay = NSProgressIndicator(frame: NSRect(x: 20, y: 35, width: 20, height: 20)); quay.style = .spinning; quay.startAnimation(nil)
-        let chu = NSTextField(labelWithString: "Đang tải Messenger Vdk \(b.ban)…"); chu.frame = NSRect(x: 52, y: 36, width: 250, height: 18)
+        let chu = NSTextField(labelWithString: "Đang tải Messenger Native \(b.ban)…"); chu.frame = NSRect(x: 52, y: 36, width: 250, height: 18)
         cho.contentView?.addSubview(quay); cho.contentView?.addSubview(chu); cho.center(); cho.makeKeyAndOrderFront(nil)
         Task {
             do {
