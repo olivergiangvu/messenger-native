@@ -381,6 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var cuaSoPhu: [NSWindow] = []   // cửa sổ bật lên (vd. cuộc gọi video)
     let nativeNotifications = NativeNotificationCoordinator()
     var suppressedWebChimes = 0
+    var lastPermissionRequestResult = "Not yet completed"
     // We no longer retain WKWebView per notification. Conversation navigation
     // is stored in the notification payload and survives a page reload.
     var daDoTim = false                             // chế độ dò VM_TIM chỉ chạy 1 lần mỗi lần mở app
@@ -432,17 +433,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSLog("VM: ĐO nhiệt máy đổi → %@", AppDelegate.tenNhiet())
         }
 
-        // Xin quyền gửi thông báo (macOS chỉ hỏi 1 lần đầu)
-        let trungTam = UNUserNotificationCenter.current()
-        trungTam.delegate = self
-        trungTam.requestAuthorization(options: [.alert, .sound, .badge]) { ok, loi in
-            NSLog("VM: quyền thông báo = %@ %@", ok ? "có" : "không", loi?.localizedDescription ?? "")
-            trungTam.getNotificationSettings { c in
-                let kieu = [UNAlertStyle.none: "KHÔNG HIỆN", .banner: "biểu ngữ", .alert: "cảnh báo (ở lại)"][c.alertStyle] ?? "?"
-                NSLog("VM: cài đặt thông báo macOS – kiểu=%@, âm thanh=%@, trung tâm thông báo=%@", kieu,
-                      c.soundSetting == .enabled ? "bật" : "tắt", c.notificationCenterSetting == .enabled ? "bật" : "tắt")
-            }
-        }
+        // Must be installed under a stable registered app path for reliable
+        // notification authorization. Running from $TMPDIR can fail with
+        // UNErrorDomain code 1 while remaining .notDetermined.
+        UNUserNotificationCenter.current().delegate = self
+        xinQuyenThongBao(hienKetQua: false)
 
         // Cấu hình nhân Safari
         let cauHinh = WKWebViewConfiguration()
@@ -1344,6 +1339,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSLog("VM: hiệu ứng phóng to = %@", ma)
     }
 
+    func xinQuyenThongBao(hienKetQua: Bool) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] allowed, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let error {
+                    let details = error as NSError
+                    self.lastPermissionRequestResult = "\(details.domain) code \(details.code): \(error.localizedDescription)"
+                } else {
+                    self.lastPermissionRequestResult = allowed ? "Authorized" : "Not authorized"
+                }
+                NSLog("MN NOTI: requestAuthorization result: %@", self.lastPermissionRequestResult)
+                if hienKetQua {
+                    let alert = NSAlert()
+                    alert.messageText = allowed ? "Đã cấp quyền thông báo" : "Chưa thể cấp quyền thông báo"
+                    let installHint = Bundle.main.bundlePath.hasPrefix("/var/folders/")
+                        ? "\nỨng dụng đang chạy từ thư mục tạm. Chạy bash install-local.sh để cài vào ~/Applications, sau đó xin quyền lại."
+                        : "\nVào System Settings → Notifications → Messenger Native để kiểm tra quyền."
+                    alert.informativeText = self.lastPermissionRequestResult + (allowed ? "" : installHint)
+                    alert.addButton(withTitle: "Đóng")
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
+    @objc func xinQuyenThongBaoTuMenu() {
+        xinQuyenThongBao(hienKetQua: true)
+    }
+
     @objc func thuThongBaoNative() {
         nativeNotifications.sendTest()
     }
@@ -1366,6 +1392,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     alert.messageText = "Notification Diagnostics"
                     alert.informativeText = """
                     Permission: \(permission)
+                    Last permission request: \(self.lastPermissionRequestResult)
+                    Bundle ID: \(Bundle.main.bundleIdentifier ?? "?")
+                    Installed path: \(Bundle.main.bundlePath)
                     Alert style: \(settings.alertStyle.rawValue)
                     Sound allowed: \(settings.soundSetting == .enabled ? "yes" : "no")
                     Previews: \(settings.showPreviewsSetting == .always ? "Always" : settings.showPreviewsSetting == .whenAuthenticated ? "When unlocked" : "Never")
@@ -1462,6 +1491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             muc("Reel Diagnostics…", #selector(chanDoanReel), "", self),
             .separator(),
             muc("Notification Diagnostics…", #selector(chanDoanThongBao), "", self),
+            muc("Request Notification Permission…", #selector(xinQuyenThongBaoTuMenu), "", self),
             muc("Send Test Notification…", #selector(thuThongBaoNative), "", self),
         ])
         them("Đoạn chat", [muc("Tin nhắn mới", #selector(tinNhanMoi), "n", self), .separator()]
