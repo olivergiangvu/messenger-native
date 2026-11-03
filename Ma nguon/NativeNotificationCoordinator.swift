@@ -14,6 +14,7 @@ final class NativeNotificationCoordinator {
     private(set) var submitted = 0
     private(set) var suppressed = 0
     private(set) var errors = 0
+    private(set) var lastSubmissionError = "none"
 
     // Never keep WKWebView instances in this coordinator. Navigation is
     // persisted in UNNotificationContent.userInfo and still works after reloads.
@@ -75,7 +76,9 @@ final class NativeNotificationCoordinator {
                 guard let self else { return }
                 if let error {
                     self.errors += 1
-                    NSLog("MN NOTI: submission failed (%@)", error.localizedDescription)
+                    let info = error as NSError
+                    self.lastSubmissionError = "\(info.domain) code \(info.code): \(error.localizedDescription)"
+                    NSLog("MN NOTI: submission failed: %@", self.lastSubmissionError)
                 } else {
                     self.submitted += 1
                     NSLog("MN NOTI: submitted to macOS (not proof of banner display)")
@@ -95,6 +98,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Errors: \(errors)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Errors: \(errors)\nLast submission error: \(lastSubmissionError)"
     }
 }
