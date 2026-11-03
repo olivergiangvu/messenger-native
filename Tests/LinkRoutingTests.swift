@@ -15,6 +15,9 @@ struct LinkRoutingTests {
                == "https://www.facebook.com/reel/2043484703034878/")
         assert(LinkRouting.canonicalReel(url("https://www.facebook.com/alice/posts/1234567")) == nil)
         assert(!LinkRouting.isReel(url("https://www.facebook.com/alice/posts/1234567")))
+        // Native Messenger already renders some share/v previews inline; do not
+        // classify or re-route them as numeric Reels.
+        assert(!LinkRouting.isReel(url("https://www.facebook.com/share/v/1JEMeWpjVL/")))
         assert(LinkRouting.openInBrowser(url("https://www.facebook.com/alice/posts/123"),
                                          userActivated: true, newWindow: false))
         assert(LinkRouting.openInBrowser(url("https://www.facebook.com/reel/123"),
