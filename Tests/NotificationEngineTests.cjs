@@ -1,0 +1,117 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const source = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'notification-engine.js'), 'utf8');
+new vm.Script(source, { filename: 'notification-engine.js' });
+
+const messages = [];
+const timeouts = [];
+const intervals = [];
+let mutationCallback;
+let rows = [];
+let hidden = false;
+let focused = true;
+
+const observerRoot = {};
+const row = (href, title, preview, unread = true, group = false) => ({
+  getAttribute(attr) {
+    return attr === 'aria-label' ? unread ? '2 tin nhắn chưa đọc' : '' : null;
+  },
+  querySelector(selector) {
+    if (selector !== 'a[href*="/t/"]') return null;
+    return { innerText: title + '\n' + preview, getAttribute: () => href };
+  },
+  querySelectorAll() { return Array(group ? 2 : 1).fill({}); },
+  closest() { return observerRoot; },
+});
+
+const document = {
+  readyState: 'complete',
+  get hidden() { return hidden; },
+  hasFocus() { return focused; },
+  querySelector(sel) { return sel === '[role="row"]' ? rows[0] || null : null; },
+  querySelectorAll(sel) { return sel === '[role="row"]' ? rows : []; },
+  createTreeWalker() { return { nextNode() { return null; } }; },
+  addEventListener() {}
+};
+
+const window = {
+  webkit: { messageHandlers: { vmThongBao: { postMessage(value) { messages.push(value); } } } },
+  __vmCaiDat: { baoTinNhan: true, boTinGoi: true },
+  addEventListener() {}
+};
+
+class MutationObserver {
+  constructor(callback) { mutationCallback = callback; }
+  observe() {}
+  disconnect() {}
+}
+const runTimers = () => {
+  let count = 0;
+  while (timeouts.length) {
+    if (++count > 300) throw new Error('Timer did not drain');
+    timeouts.shift()();
+  }
+};
+vm.runInNewContext(source, {
+  window, document, location: { href: 'https://www.messenger.com', pathname: '/' },
+  MutationObserver, NodeFilter: { SHOW_TEXT: 4 },
+  getComputedStyle: () => ({ fontWeight: '400' }),
+  setTimeout(callback) { timeouts.push(callback); },
+  setInterval(callback) { intervals.push(callback); },
+  URL,
+});
+
+const received = () => messages.filter((item) => item.id && item.nguon === 'dom');
+rows = [row('/t/alice', 'Alice', 'Old preview')];
+intervals[0]();  // Bind observer once rows exist.
+runTimers();
+assert.equal(window.__mnNotificationStatus().initialized, true);
+assert.equal(received().length, 0, 'Initial load must not flood old unread previews');
+
+// First update after losing focus must notify; no "first blur" discard.
+hidden = true;
+focused = false;
+rows = [
+  row('/t/alice', 'Alice', 'New preview'),
+  row('/t/bob', 'Bob', 'First message')
+];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 2);
+
+// More than three changed conversations in a single scan must not be lost.
+rows = [
+  row('/t/alice', 'Alice', 'Changed again'),
+  row('/t/bob', 'Bob', 'Changed again'),
+  row('/t/carol', 'Carol', 'New'),
+  row('/t/david', 'David', 'New'),
+  row('/t/group', 'Project Group', 'Minh: New document', true, true),
+];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 7, 'Must deliver all five changes, not just three');
+const group = received().find((item) => item.tag === '/t/group');
+assert.equal(group.tieuDe, 'Project Group');
+assert.equal(group.phuDe, 'Minh');
+assert.equal(group.noiDung, 'New document');
+
+// Foreground scan refreshes baseline instead of treating it as new on blur.
+hidden = false;
+focused = true;
+rows = [row('/t/alice', 'Alice', 'Read while foreground')];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 7);
+hidden = true;
+focused = false;
+rows = [row('/t/alice', 'Alice', 'Next after blur')];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 8);
+
+assert.equal(window.__mnNotificationStatus().sent, 8);
+console.log('Notification engine: baseline, first-blur, 5-message burst, group subtitle, foreground tests passed.');
