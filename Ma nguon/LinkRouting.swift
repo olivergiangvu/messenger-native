@@ -22,11 +22,34 @@ enum LinkRouting {
         return matches(host, domain: "fbcdn.net") || matches(host, domain: "fbsbx.com")
     }
 
+    /// Normalize both ordinary and tracked Facebook Reel links.
+    /// Restrict IDs to digits: this must not misclassify a Facebook post or login.
+    static func canonicalReel(_ url: URL) -> URL? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        guard let host = url.host?.lowercased() else { return nil }
+
+        if host == "l.facebook.com" || host == "l.messenger.com" {
+            guard let target = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "u" })?.value,
+                  let destination = URL(string: target) else { return nil }
+            return canonicalReelDestination(destination)
+        }
+        return canonicalReelDestination(url)
+    }
+
+    private static func canonicalReelDestination(_ url: URL) -> URL? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        guard let host = url.host?.lowercased(),
+              ["facebook.com", "www.facebook.com", "m.facebook.com"].contains(host) else { return nil }
+        let parts = url.path.split(separator: "/")
+        guard parts.count >= 2, parts[0].lowercased() == "reel" || parts[0].lowercased() == "reels" else { return nil }
+        let identifier = String(parts[1])
+        guard !identifier.isEmpty, identifier.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else { return nil }
+        return URL(string: "https://www.facebook.com/reel/\(identifier)/")
+    }
+
     static func isReel(_ url: URL) -> Bool {
-        guard isFacebook(url) else { return false }
-        let components = url.path.lowercased().split(separator: "/")
-        guard let first = components.first else { return false }
-        return (first == "reel" || first == "reels") && components.count >= 2
+        canonicalReel(url) != nil
     }
 
     private static func isAuthentication(_ url: URL) -> Bool {
