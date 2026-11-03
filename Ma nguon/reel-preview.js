@@ -13,6 +13,9 @@
   let recentTarget = null;
   let recentAt = 0;
   let openPlayer = null;
+  let seenClicks = 0;
+  let matchedClicks = 0;
+  let lastAction = 'ready';
 
   function canonicalReel(input) {
     try {
@@ -74,7 +77,7 @@
 
   function placePlayer(url, element) {
     const canonical = canonicalReel(url);
-    if (!canonical || !document.body) return false;
+    if (!canonical || !document.body) { lastAction = 'invalid-reel-or-no-document'; return false; }
 
     let anchor = element instanceof Element && element.isConnected ? element : null;
     if (!anchor && recentTarget instanceof Element && recentTarget.isConnected &&
@@ -93,7 +96,7 @@
         if (canonicalReel(href || '') === canonical) { anchor = candidate; break; }
       }
     }
-    if (!anchor || !anchor.parentElement) return false;
+    if (!anchor || !anchor.parentElement) { lastAction = 'no-chat-anchor'; return false; }
 
     // Do not close an existing player unless the new player has a valid target.
     if (openPlayer && openPlayer.isConnected) {
@@ -165,6 +168,7 @@
     panel.append(iframe, footer);
     anchor.insertAdjacentElement('afterend', panel);
     openPlayer = panel;
+    lastAction = 'inline-player-inserted';
     return true;
   }
 
@@ -177,11 +181,14 @@
 
   document.addEventListener('pointerdown', rememberTarget, true);
   document.addEventListener('click', (event) => {
+    seenClicks += 1;
     if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
         event.ctrlKey || event.shiftKey || event.altKey) return;
     rememberTarget(event);
     const match = findClickedReel(event.target);
-    if (!match) return;
+    if (!match) { lastAction = 'unmatched-click'; return; }
+    matchedClicks += 1;
+    lastAction = 'reel-click-detected';
     event.preventDefault();
     event.stopImmediatePropagation();
     placePlayer(match.url, match.anchor);
@@ -193,6 +200,10 @@
   window.__mnCanonicalReel = canonicalReel; // Safari Web Inspector diagnostics.
   window.__mnReelStatus = () => ({
     installed: true,
+    version: '2.1-diagnostics',
+    seenClicks,
+    matchedClicks,
+    lastAction,
     playerVisible: !!(openPlayer && openPlayer.isConnected),
     recentGesture: Date.now() - recentAt < 6000
   });
