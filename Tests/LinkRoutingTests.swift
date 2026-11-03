@@ -6,6 +6,14 @@ struct LinkRoutingTests {
         func url(_ value: String) -> URL { URL(string: value)! }
 
         assert(LinkRouting.isReel(url("https://www.facebook.com/reel/1234567")))
+        // Exact field reports from the user on 2026-11-03.
+        assert(LinkRouting.canonicalReel(url("https://www.facebook.com/reel/2043484703034878"))?.absoluteString
+               == "https://www.facebook.com/reel/2043484703034878/")
+        assert(LinkRouting.canonicalReel(url("https://www.facebook.com/reel/1989333375359780/?fs=e&rdid=u1fiTtDcKAf1cMtb&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fv%2F1BJfeHChG4%2F"))?.absoluteString
+               == "https://www.facebook.com/reel/1989333375359780/")
+        assert(LinkRouting.canonicalReel(url("https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.facebook.com%2Freel%2F2043484703034878"))?.absoluteString
+               == "https://www.facebook.com/reel/2043484703034878/")
+        assert(LinkRouting.canonicalReel(url("https://www.facebook.com/alice/posts/1234567")) == nil)
         assert(!LinkRouting.isReel(url("https://www.facebook.com/alice/posts/1234567")))
         assert(LinkRouting.openInBrowser(url("https://www.facebook.com/alice/posts/123"),
                                          userActivated: true, newWindow: false))
