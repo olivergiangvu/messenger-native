@@ -640,6 +640,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
+    /// Meta can create an about:blank popup first and only then navigate it
+    /// to a Reel. Dispose of that temporary popup without closing live calls.
+    private func dongPopupRongNeuCan(_ trang: WKWebView) {
+        guard trang != self.webView,
+              trang.url == nil || trang.url?.scheme == "about",
+              let cuaSo = trang.window, cuaSo != window else { return }
+        DispatchQueue.main.async { cuaSo.close() }
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if action.shouldPerformDownload { return decisionHandler(.download) }   // <a download>, blob, "Tải ảnh xuống"
@@ -647,11 +656,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return decisionHandler(.allow)             // khung con (iframe) → để trang tự lo
         }
         let target = linkThat(url) ?? url
-        // Only user navigation from the main conversation frame, never
-        // navigation inside the actual embedded Facebook video iframe.
-        if webView == self.webView && action.sourceFrame.isMainFrame,
-           LinkRouting.isReel(target) {
-            moReelTrongHoiThoai(target, trong: webView)
+        // Also recover about:blank popups that later navigate to a Reel.
+        // Navigation inside the actual embedded video iframe is unaffected.
+        if action.sourceFrame.isMainFrame, LinkRouting.isReel(target) {
+            moReelTrongHoiThoai(target, trong: self.webView)
+            dongPopupRongNeuCan(webView)
             return decisionHandler(.cancel)
         }
         if let that = linkThat(url) {
@@ -1128,9 +1137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
         let target = linkThat(url) ?? url
-        if webView == self.webView && action.sourceFrame.isMainFrame,
-           LinkRouting.isReel(target) {
-            moReelTrongHoiThoai(target, trong: webView)
+        if action.sourceFrame.isMainFrame, LinkRouting.isReel(target) {
+            moReelTrongHoiThoai(target, trong: self.webView)
+            dongPopupRongNeuCan(webView)
             return nil
         }
         if let that = linkThat(url) { NSWorkspace.shared.open(that); return nil }
