@@ -380,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var webView: WKWebView!
     var cuaSoPhu: [NSWindow] = []   // cửa sổ bật lên (vd. cuộc gọi video)
     let nativeNotifications = NativeNotificationCoordinator()
+    var suppressedWebChimes = 0
     // We no longer retain WKWebView per notification. Conversation navigation
     // is stored in the notification payload and survives a page reload.
     var daDoTim = false                             // chế độ dò VM_TIM chỉ chạy 1 lần mỗi lần mở app
@@ -563,6 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id]); return
         }
         if d["amBaoTinNhan"] as? Bool == true {
+            suppressedWebChimes += 1
             // A tiny AppKit sound does not create WebKit media sessions.
             // Background audio is supplied by macOS notification sound to
             // respect Focus, per-app sound settings and quiet hours.
@@ -1342,6 +1344,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSLog("VM: hiệu ứng phóng to = %@", ma)
     }
 
+    @objc func thuThongBaoNative() {
+        nativeNotifications.sendTest()
+    }
+
+    @objc func chanDoanThongBao() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                let script = "JSON.stringify(window.__mnNotificationStatus ? window.__mnNotificationStatus() : {installed:false})"
+                self.webView.evaluateJavaScript(script) { value, error in
+                    let permission: String
+                    switch settings.authorizationStatus {
+                    case .authorized: permission = "Allowed"
+                    case .provisional: permission = "Provisional"
+                    case .denied: permission = "DENIED"
+                    case .notDetermined: permission = "Not requested"
+                    case .ephemeral: permission = "Ephemeral"
+                    @unknown default: permission = "Unknown"
+                    }
+                    let engine = (value as? String) ?? "Engine unavailable: \(error?.localizedDescription ?? "unknown")"
+                    let alert = NSAlert()
+                    alert.messageText = "Notification Diagnostics"
+                    alert.informativeText = """
+                    Permission: \(permission)
+                    Alert style: \(settings.alertStyle.rawValue)
+                    Sound allowed: \(settings.soundSetting == .enabled ? "yes" : "no")
+                    Notification Center: \(settings.notificationCenterSetting == .enabled ? "yes" : "no")
+                    Web message chimes blocked: \(self.suppressedWebChimes)
+                    \(self.nativeNotifications.status)
+
+                    NotificationEngine: \(engine)
+
+                    A successful submission does not guarantee a banner:
+                    macOS Focus and per-app notification settings still apply.
+                    """
+                    alert.addButton(withTitle: "Đóng")
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
     @objc func chanDoanReel() {
         // Read from the exact WKWebView currently serving Messenger.
         let script = "JSON.stringify(window.__mnReelStatus ? window.__mnReelStatus() : {installed:false})"
@@ -1416,6 +1460,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             .separator(),
             muc("Công cụ soi trang (DevTools)", #selector(moDevTools), "i", self, [.command, .option]),
             muc("Reel Diagnostics…", #selector(chanDoanReel), "", self),
+            .separator(),
+            muc("Notification Diagnostics…", #selector(chanDoanThongBao), "", self),
+            muc("Send Test Notification…", #selector(thuThongBaoNative), "", self),
         ])
         them("Đoạn chat", [muc("Tin nhắn mới", #selector(tinNhanMoi), "n", self), .separator()]
             + (1...9).map { n in
