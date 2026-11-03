@@ -1368,6 +1368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     Permission: \(permission)
                     Alert style: \(settings.alertStyle.rawValue)
                     Sound allowed: \(settings.soundSetting == .enabled ? "yes" : "no")
+                    Previews: \(settings.showPreviewsSetting == .always ? "Always" : settings.showPreviewsSetting == .whenAuthenticated ? "When unlocked" : "Never")
                     Notification Center: \(settings.notificationCenterSetting == .enabled ? "yes" : "no")
                     Web message chimes blocked: \(self.suppressedWebChimes)
                     \(self.nativeNotifications.status)
