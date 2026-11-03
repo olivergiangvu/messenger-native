@@ -1,14 +1,15 @@
 name: macOS Build and Regression Tests
 
 on:
-  push:
-    branches:
-      - feature/notification-nowplaying
   pull_request:
     branches:
       - develop
       - feature/link-routing-reels
   workflow_dispatch:
+
+concurrency:
+  group: messenger-native-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   macos:
