@@ -76,15 +76,14 @@
     const canonical = canonicalReel(url);
     if (!canonical || !document.body) return false;
 
-    if (openPlayer && openPlayer.isConnected) {
-      openPlayer.__mnClose && openPlayer.__mnClose();
-    }
-
     let anchor = element instanceof Element && element.isConnected ? element : null;
     if (!anchor && recentTarget instanceof Element && recentTarget.isConnected &&
         Date.now() - recentAt < 6000) {
       const candidate = findClickedReel(recentTarget);
-      anchor = (candidate && candidate.anchor) || recentTarget.closest('a, [role="link"], [role="button"], div');
+      if (!candidate || candidate.url === canonical) {
+        anchor = (candidate && candidate.anchor) ||
+          recentTarget.closest('a, [role="link"], [role="button"], div');
+      }
     }
     if (!anchor) {
       // Recovery for JS-generated window.open: locate the actual URL in the DOM.
@@ -96,6 +95,10 @@
     }
     if (!anchor || !anchor.parentElement) return false;
 
+    // Do not close an existing player unless the new player has a valid target.
+    if (openPlayer && openPlayer.isConnected) {
+      openPlayer.__mnClose && openPlayer.__mnClose();
+    }
     const panel = document.createElement('div');
     panel.dataset.mnReelPlayer = 'true';
     panel.setAttribute('role', 'group');
