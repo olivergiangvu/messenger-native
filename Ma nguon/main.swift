@@ -1,4 +1,4 @@
-// Messenger Vdk (trước: Vduck Messenger, đổi tên 03/11) – bản clone học tập của MessengerApp
+// Messenger Native (trước: Vduck Messenger, đổi tên 03/11) – bản clone học tập của MessengerApp
 // Học theo app "MessengerApp" của Stefan (MIT, github.com/stefanminch/messenger-mac),
 // nhưng viết lại bằng Swift + WKWebView (nhân Safari) thay cho Electron (nhân Chrome).
 //
@@ -481,6 +481,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         cauHinh.userContentController.addUserScript(
             WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
+        // Intercept at documentStart, before Messenger's React click handlers.
+        // No extra WKWebView is created for a Reel thumbnail.
+        if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
+           let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: reelSource, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            NSLog("MN REEL: injected controller (%d UTF-8 bytes)", reelSource.utf8.count)
+        } else {
+            NSLog("MN REEL ERROR: missing reel-preview.js from app bundle")
+        }
+
         cauHinh.userContentController.add(self, name: "vmThongBao")
         // Giữ đăng nhập: theo dõi cookie để đổi cookie phiên thành cookie 1 năm
         cauHinh.websiteDataStore.httpCookieStore.add(self)
@@ -533,6 +544,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let d = message.body as? [String: Any] else { return }
+        if let raw = d["moNgoaiReel"] as? String,
+           let url = URL(string: raw),
+           let reel = LinkRouting.canonicalReel(url),
+           message.webView == webView {
+            NSWorkspace.shared.open(reel)
+            return
+        }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
             if goiDen == nil, !NSApp.isActive, caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }   // chỉ cuộc gọi mới nảy Dock
@@ -596,17 +614,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: Điều hướng – link trong app hay mở ra trình duyệt
 
+    /// Fallback for React-driven navigation/window.open which bypasses the
+    /// document's anchor click handler. We never spawn a Reel WKWebView.
+    private func moReelTrongHoiThoai(_ url: URL, trong trang: WKWebView) {
+        guard let reel = LinkRouting.canonicalReel(url),
+              let encoded = try? JSONSerialization.data(withJSONObject: reel.absoluteString,
+                                                         options: [.fragmentsAllowed]),
+              let quoted = String(data: encoded, encoding: .utf8) else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        let script = "Boolean(window.__mnOpenReelFromNative && window.__mnOpenReelFromNative(\(quoted)))"
+        trang.evaluateJavaScript(script) { result, error in
+            if let error {
+                NSLog("MN REEL: native fallback failed: %@", error.localizedDescription)
+            }
+            if result as? Bool != true {
+                // Script missing, no identifiable chat anchor, or injection blocked.
+                // Respect the user's click rather than silently losing it.
+                NSLog("MN REEL: no inline target; opening default browser")
+                NSWorkspace.shared.open(reel)
+            } else {
+                NSLog("MN REEL: inline player inserted via native fallback")
+            }
+        }
+    }
+
+    /// Meta can create an about:blank popup first and only then navigate it
+    /// to a Reel. Dispose of that temporary popup without closing live calls.
+    private func dongPopupRongNeuCan(_ trang: WKWebView) {
+        guard trang != self.webView,
+              trang.url == nil || trang.url?.scheme == "about",
+              let cuaSo = trang.window, cuaSo != window else { return }
+        DispatchQueue.main.async { cuaSo.close() }
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if action.shouldPerformDownload { return decisionHandler(.download) }   // <a download>, blob, "Tải ảnh xuống"
         guard let url = action.request.url, action.targetFrame?.isMainFrame != false else {
             return decisionHandler(.allow)             // khung con (iframe) → để trang tự lo
         }
+        let target = linkThat(url) ?? url
+        // Also recover about:blank popups that later navigate to a Reel.
+        // Navigation inside the actual embedded video iframe is unaffected.
+        if action.sourceFrame.isMainFrame, LinkRouting.isReel(target) {
+            moReelTrongHoiThoai(target, trong: self.webView)
+            dongPopupRongNeuCan(webView)
+            return decisionHandler(.cancel)
+        }
         if let that = linkThat(url) {
             NSWorkspace.shared.open(that); return decisionHandler(.cancel)
         }
-        if laTrongApp(url) { decisionHandler(.allow) }
-        else { NSWorkspace.shared.open(url); decisionHandler(.cancel) }
+        if LinkRouting.openInBrowser(url, userActivated: action.navigationType == .linkActivated, newWindow: false) {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+        } else {
+            decisionHandler(.allow)
+        }
     }
 
     // MARK: Tải file / lưu ảnh → thư mục Tải về (nhân Safari KHÔNG tự tải như Chrome của bản gốc)
@@ -1071,8 +1136,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
+        let target = linkThat(url) ?? url
+        if action.sourceFrame.isMainFrame, LinkRouting.isReel(target) {
+            moReelTrongHoiThoai(target, trong: self.webView)
+            dongPopupRongNeuCan(webView)
+            return nil
+        }
         if let that = linkThat(url) { NSWorkspace.shared.open(that); return nil }
-        if !laTrongApp(url) { NSWorkspace.shared.open(url); return nil }
+        if LinkRouting.openInBrowser(url, userActivated: action.navigationType == .linkActivated, newWindow: true) {
+            NSWorkspace.shared.open(url)
+            return nil
+        }
         // Bấm "Tải xuống" file đính kèm → Messenger mở link file (fbsbx/fbcdn) trong cửa sổ mới → tải thẳng về
         if let h = url.host, h.hasSuffix("fbsbx.com") || h.hasSuffix("fbcdn.net") {
             webView.startDownload(using: action.request) { [weak self] d in d.delegate = self; self?.dangTai.append(d) }
@@ -1250,6 +1324,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSLog("VM: hiệu ứng phóng to = %@", ma)
     }
 
+    @objc func chanDoanReel() {
+        // Read from the exact WKWebView currently serving Messenger.
+        let script = "JSON.stringify(window.__mnReelStatus ? window.__mnReelStatus() : {installed:false})"
+        webView.evaluateJavaScript(script) { result, error in
+            let alert = NSAlert()
+            alert.messageText = "Reel Diagnostics"
+            alert.alertStyle = .informational
+            if let error {
+                alert.informativeText = "Không thể đọc script: \(error.localizedDescription)"
+            } else {
+                alert.informativeText = (result as? String) ?? "Không nhận được trạng thái."
+            }
+            alert.addButton(withTitle: "Đóng")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
     func taoMenu() {
         let menuChinh = NSMenu()
 
@@ -1305,6 +1397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             muc("Toàn màn hình", #selector(NSWindow.toggleFullScreen(_:)), "f", nil, [.command, .control]),
             .separator(),
             muc("Công cụ soi trang (DevTools)", #selector(moDevTools), "i", self, [.command, .option]),
+            muc("Reel Diagnostics…", #selector(chanDoanReel), "", self),
         ])
         them("Đoạn chat", [muc("Tin nhắn mới", #selector(tinNhanMoi), "n", self), .separator()]
             + (1...9).map { n in
@@ -1767,15 +1860,15 @@ extension AppDelegate {
 
 // MARK: Cài đặt (⌘,) – 4 tab: Thông báo · Cuộc gọi · Tải file · Chung (anh duyệt trang xem thử 03/11, bỏ phần Cập nhật – làm sau)
 let ngayPhatHanh = "03/11/2026"
-let tenApp = "Messenger Vdk"           // tên app (anh chốt 03/11; trước: Vduck Messenger → Messenger → Messenger AppD)
+let tenApp = "Messenger Native"           // tên app (anh chốt 03/11; trước: Vduck Messenger → Messenger → Messenger AppD)
 let coGiMoi = """
 0.6.1 – 03/11/2026
-• Cập nhật ngay trong app: Cài đặt → Chung → Kiểm tra cập nhật (hoặc menu Messenger Vdk). Bản mới được kiểm chữ ký số rồi tự cài, mở lại – không phải bấm «Vẫn mở» lại
+• Cập nhật ngay trong app: Cài đặt → Chung → Kiểm tra cập nhật (hoặc menu Messenger Native). Bản mới được kiểm chữ ký số rồi tự cài, mở lại – không phải bấm «Vẫn mở» lại
 • Nút «Đăng xuất và xoá dữ liệu» (Cài đặt → Chung) cho máy dùng chung
 • DMG mới có ảnh nền + hướng dẫn mở lần đầu
 
 0.6.0 – 03/11/2026
-• Đổi tên thành Messenger Vdk, thêm cửa sổ Cài đặt (⌘,)
+• Đổi tên thành Messenger Native, thêm cửa sổ Cài đặt (⌘,)
 • Thông báo tin nhắn khi ở app khác (cả tin nhóm), Dock chỉ nảy khi có cuộc gọi
 • Bảng nổi cuộc gọi đến: phân biệt gọi thoại / video / gọi nhóm (kèm tên nhóm), bấm Từ chối / Chấp nhận ngay trên bảng
 • Gác máy là tắt chuông
@@ -2068,7 +2161,7 @@ extension AppDelegate {
 // bằng khoá công khai gắn sẵn (khoá bí mật chỉ nằm trong Keychain máy anh, xem phat-hanh/khoa.swift) → thay app → mở lại.
 // File do app tự tải không bị gắn dấu "tải từ Internet" → người dùng không phải bấm "Vẫn mở" lại.
 let khoaCongKhaiCapNhat = "t62Zb9HEl8O9BqefxiJHXaYkRCJmxNyoMnNC9OJ1YH0="
-let khoGitHub = "Vduck141/messenger-vdk"
+let khoGitHub = "olivergiangvu/messenger-native"
 
 struct BanPhatHanh { let ban: String; let ghiChu: String; let zip: URL?; let sig: URL?; let trang: URL }
 enum LoiCapNhat: LocalizedError {
@@ -2097,7 +2190,7 @@ extension AppDelegate {
             UserDefaults.standard.removeObject(forKey: "vuaCapNhatTu")
             NSLog("VM: CẬP NHẬT xong %@ → %@", tu, banHienTai)
             trangThaiCapNhat = "Đã cập nhật lên \(banHienTai)"
-            let nd = UNMutableNotificationContent(); nd.title = "Đã cập nhật Messenger Vdk \(banHienTai)"; nd.body = "Từ bản \(tu). Đăng nhập và cài đặt giữ nguyên."
+            let nd = UNMutableNotificationContent(); nd.title = "Đã cập nhật Messenger Native \(banHienTai)"; nd.body = "Từ bản \(tu). Đăng nhập và cài đặt giữ nguyên."
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "capnhat", content: nd, trigger: nil))
         }
         // Không tự hỏi GitHub (anh chốt 03/11: người dùng tự bấm «Kiểm tra cập nhật» trong Cài đặt / menu).
@@ -2158,7 +2251,7 @@ extension AppDelegate {
             NSLog("VM: CẬP NHẬT – mới nhất %@, đang dùng %@", b.ban, banHienTai)
             if soSanhBan(b.ban, banHienTai) <= 0 {
                 self.trangThaiCapNhat = "Đang dùng bản mới nhất (\(banHienTai))"
-                if !imLang { self.baoCapNhat("Bạn đang dùng bản mới nhất", "Messenger Vdk \(banHienTai).") }
+                if !imLang { self.baoCapNhat("Bạn đang dùng bản mới nhất", "Messenger Native \(banHienTai).") }
                 return
             }
             self.trangThaiCapNhat = "Có bản mới \(b.ban)"
@@ -2173,7 +2266,7 @@ extension AppDelegate {
         // Ghi chú Release (Markdown) → chữ thường, tối đa 14 dòng
         let ghi = b.ghiChu.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "#", with: "")
             .split(separator: "\n", omittingEmptySubsequences: true).prefix(14).joined(separator: "\n")
-        let a = NSAlert(); a.messageText = "Có bản Messenger Vdk \(b.ban)"
+        let a = NSAlert(); a.messageText = "Có bản Messenger Native \(b.ban)"
         a.informativeText = "Bạn đang dùng \(banHienTai).\n\n\(ghi)"
         let tuCai = b.zip != nil && b.sig != nil
         a.addButton(withTitle: tuCai ? "Cập nhật ngay" : "Mở trang tải"); a.addButton(withTitle: "Để sau")
@@ -2193,7 +2286,7 @@ extension AppDelegate {
         let cho = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 90), styleMask: [.titled], backing: .buffered, defer: false)
         cho.title = "Đang cập nhật"
         let quay = NSProgressIndicator(frame: NSRect(x: 20, y: 35, width: 20, height: 20)); quay.style = .spinning; quay.startAnimation(nil)
-        let chu = NSTextField(labelWithString: "Đang tải Messenger Vdk \(b.ban)…"); chu.frame = NSRect(x: 52, y: 36, width: 250, height: 18)
+        let chu = NSTextField(labelWithString: "Đang tải Messenger Native \(b.ban)…"); chu.frame = NSRect(x: 52, y: 36, width: 250, height: 18)
         cho.contentView?.addSubview(quay); cho.contentView?.addSubview(chu); cho.center(); cho.makeKeyAndOrderFront(nil)
         Task {
             do {

@@ -1,0 +1,132 @@
+# Native link routing and inline Facebook Reels (experimental)
+
+## Product behavior
+
+- Ordinary Facebook posts, pages, profiles and external websites open in macOS's default browser via `NSWorkspace`.
+- Messenger conversation navigation and sign-in remain inside the main `WKWebView`.
+- Voice/video calls keep their existing popup/PiP flow.
+- Clicking an image thumbnail linking to a **public Facebook Reel** attempts to embed its player in the **same Messenger chat DOM**, without creating another WKWebView or a standalone popup.
+- Both normal Reel text-link clicks and Reel thumbnail clicks attempt playback in the conversation. The player's **Open in browser** button opens the default browser.
+- Attachments and FB CDN downloads retain the original download handling.
+
+## Implementation
+
+- `Ma nguon/LinkRouting.swift`: Foundation-only URL routing policy shared by WKNavigationDelegate and WKUIDelegate.
+- `Ma nguon/reel-preview.js`: conservative click interceptor for Reel thumbnails. Uses Meta's public embedded-video player. Does not scrape raw media or bypass privacy restrictions.
+- `build.sh`: compiles LinkRouting.swift and copies the JavaScript into the application bundle.
+- `Tests/LinkRoutingTests.swift`: routing assertions, runnable using `swiftc`.
+
+## Run routing tests
+
+```bash
+swiftc 'Ma nguon/LinkRouting.swift' 'Tests/LinkRoutingTests.swift' -o /tmp/messenger-link-tests
+/tmp/messenger-link-tests
+```
+
+## Test on macOS
+
+1. Open a normal Facebook post thumbnail and a plain post link: both should open the default browser.
+2. Open a public Reel thumbnail: inline player should appear in the chat bubble; closing it restores the thumbnail.
+3. Use the player fallback link: it should open the default browser.
+4. Try a private/friends-only Reel: expect embed restrictions; open it in the browser instead.
+5. Verify ordinary internal Messenger chat navigation, login/2FA, file downloads and voice/video calls still work.
+6. Try a link that launches `window.open('about:blank')` before redirecting. The existing popup logic remains for these flows and needs separate regression testing.
+
+## Known limitations / safety
+
+- This is a **prototype**, not a verified reproduction of the retired native Messenger app's Reel player.
+- Meta can change the preview DOM; previews without clickable `<img>`/`<video>`/picture elements may fall back to external browser.
+- Public embeds may fail because of content permissions, frame/CSP restrictions or browser playback rules. The player always exposes an external-browser fallback.
+- Starting a Reel may legitimately create a Now Playing session. The separate notification-sound bug must be fixed without disabling real video playback.
+- Neither a successful JavaScript syntax check nor Foundation-only Swift tests demonstrate successful macOS app compilation or actual Reel playback.
+- The existing `about:blank` new-window behavior is not fully redesigned here, to avoid breaking the call flow without end-to-end tests.
+
+This work is based on the `v0.6.1` MIT-licensed code. The upstream attribution/license must be retained.
+
+## Independent fork identity
+
+This feature branch also changes the test app to **Messenger Native.app** with bundle ID
+`com.olivergiangvu.messengernative`, fork version `0.1.0`, and the update repository
+`olivergiangvu/messenger-native`. This prevents replacing the original Messenger Vdk app.
+A different bundle ID has its own WebKit storage; logging in again is expected.
+
+Do not use in-app updates until a new independent release-signing key and signed
+fork release pipeline are configured. The original embedded verification key is
+not a release key for this fork.
+
+
+## v2 regression fix (reported 2026-11-03)
+
+User-provided examples:
+
+- https://www.facebook.com/reel/2043484703034878
+- https://www.facebook.com/reel/1989333375359780/?fs=e&rdid=u1fiTtDcKAf1cMtb&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fv%2F1BJfeHChG4%2F
+
+Both normalize to https://www.facebook.com/reel/{numericID}/. Tracking parameters are intentionally dropped.
+
+**Root cause of initial failure:** v1 intercepted only image or video clicks inside a standard anchor. Messenger's React-powered preview can instead use a clickable DIV or call window.open directly.
+
+v2 registers a click listener at documentStart, recognizes text links, preview links and Meta redirect URLs, and uses a native Swift recovery path for WebKit navigation/window-open events. It also recovers popups that start as about:blank before navigating to a Reel URL.
+
+The inline player uses Meta's public embedded-video endpoint. **The ability to embed these exact videos has not been verified**. Access permissions, frame/CSP restrictions and the Messenger DOM may still block playback.
+
+### Build and test (Mac)
+
+```bash
+cd ~/messenger-native
+git fetch origin
+git switch feature/link-routing-reels
+git pull --ff-only
+
+node Tests/ReelPreviewTests.cjs
+swiftc "Ma nguon/LinkRouting.swift" "Tests/LinkRoutingTests.swift" -o /tmp/mn-link-routing-tests
+/tmp/mn-link-routing-tests
+
+bash build.sh
+open -n "$TMPDIR/messenger-native-build/Messenger Native.app"
+```
+
+Quit the previous Messenger Native instance before opening the rebuilt copy; it is separate from Messenger Vdk.
+
+### Debug
+
+In Safari Web Inspector for Messenger Native's main view, evaluate:
+
+```javascript
+window.__mnReelStatus()
+// Expected: { installed: true, playerVisible: false, recentGesture: ... }
+window.__mnCanonicalReel('https://www.facebook.com/reel/2043484703034878')
+// Expected: https://www.facebook.com/reel/2043484703034878/
+```
+
+If __mnReelStatus is missing, an older app build may be running or the script was not injected. On startup, the app should log MN REEL: injected controller. If the inline player appears but cannot play, inspect Meta embed eligibility and WKWebView frame/CSP errors first.
+
+The controller never extracts private video streams. Active Reel playback may legitimately register in macOS Now Playing; the separately prioritized bug concerns incoming-message notification sounds.
+
+
+## Diagnostic build update (2026-11-04)
+
+Reported behavior:
+- https://www.facebook.com/share/v/1JEMeWpjVL/ already plays inside the Messenger chat.
+- Two numeric /reel/<id> links still open externally.
+
+The working share/v example is **not** an instruction to rewrite numeric Reel IDs into share/v short links; these are distinct URL forms and their relation cannot be derived from the digits alone. Preserve Messenger's existing inline player when available.
+
+### Important: quit the previous build first
+
+The fork contains an explicit single-instance guard at the bottom of main.swift. When an older Messenger Native process is already running, launching with \`open -n\` creates a second process that activates the **old** process and exits. Building a fresh .app on disk does not upgrade a running process.
+
+Quit Messenger Native using Command-Q, then build and launch the new version. Do not use \`open -n\` during regression testing.
+
+### Built-in diagnostics
+
+The View / Xem menu now has **Reel Diagnostics…**. Use it while the Messenger main window is open:
+
+1. After launch, open Reel Diagnostics. Expected: installed=true and version=2.1-diagnostics.
+2. Click one numeric Reel link in Messenger, then open Reel Diagnostics again.
+3. Report seenClicks, matchedClicks, lastAction, and playerVisible; this distinguishes injection/DOM click issues from Meta embed or routing issues.
+4. If the menu is absent, the old binary is almost certainly still running.
+
+Node.js is an optional local JavaScript test tool and is **not** required by Messenger Native. JavaScript such as window.__mnReelStatus() belongs in Safari Web Inspector's JavaScript console, **not** the macOS Terminal.
+
+No private chat content or complete clicked URL is included in the diagnostic status.
