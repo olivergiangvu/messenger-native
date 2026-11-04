@@ -1467,6 +1467,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
+    @objc func dungChuongGoiNgay() {
+        callRinger.stop(reason: "manual Stop Ringing")
+        webView.evaluateJavaScript("window.__mnStopIncomingRingtone && window.__mnStopIncomingRingtone()", completionHandler: nil)
+    }
+
+    @objc func chanDoanCuocGoi() {
+        let script = "JSON.stringify(window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false})"
+        webView.evaluateJavaScript(script) { value, error in
+            let dialog = NSAlert()
+            dialog.messageText = "Call Diagnostics"
+            dialog.informativeText = """
+            \(self.callRinger.status)
+            Active call windows: \(self.callWindowsByPath.count)
+            Duplicate call popups blocked: \(self.duplicateCallPopupsBlocked)
+
+            Audio bridge: \((value as? String) ?? "Unavailable: \(error?.localizedDescription ?? "unknown")")
+
+            If call log items are duplicated but blocked popups remains zero,
+            the duplicate may originate in Messenger's server-side history.
+            """
+            dialog.addButton(withTitle: "Đóng")
+            NSApp.activate(ignoringOtherApps: true)
+            dialog.runModal()
+        }
+    }
+
     @objc func chanDoanReel() {
         // Read from the exact WKWebView currently serving Messenger.
         let script = "JSON.stringify(window.__mnReelStatus ? window.__mnReelStatus() : {installed:false})"
@@ -1545,6 +1571,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             muc("Notification Diagnostics…", #selector(chanDoanThongBao), "", self),
             muc("Request Notification Permission…", #selector(xinQuyenThongBaoTuMenu), "", self),
             muc("Send Test Notification…", #selector(thuThongBaoNative), "", self),
+            .separator(),
+            muc("Call Diagnostics…", #selector(chanDoanCuocGoi), "", self),
+            muc("Stop Ringing Now", #selector(dungChuongGoiNgay), "", self),
         ])
         them("Đoạn chat", [muc("Tin nhắn mới", #selector(tinNhanMoi), "n", self), .separator()]
             + (1...9).map { n in
