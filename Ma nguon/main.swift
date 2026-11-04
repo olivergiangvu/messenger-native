@@ -675,34 +675,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         return result
     }
 
-    // Anh bấm vào thông báo → đưa cửa sổ lên + báo cho trang để nó mở đúng cuộc trò chuyện
+    // Bấm vào thông báo trong lúc WKWebView chạy nền: dùng navigation native
+    // để chắc chắn mở hội thoại. DOM element.click() có thể báo thành công
+    // nhưng React không chuyển chat khi vừa thoát trạng thái background.
     func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse,
                                 withCompletionHandler xong: @escaping () -> Void) {
+        guard r.actionIdentifier == UNNotificationDefaultActionIdentifier else {
+            xong()
+            return
+        }
         let id = r.notification.request.identifier
         let path = r.notification.request.content.userInfo["mnConversationPath"] as? String ?? ""
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
-            self.webView.window?.makeKeyAndOrderFront(nil)
-            // Prefer the page's original onclick for new Notification(...).
-            // Otherwise click a currently visible conversation, or navigate
-            // directly using the stable path retained in userInfo.
+            if self.window.isMiniaturized { self.window.deminiaturize(nil) }
+            self.window.makeKeyAndOrderFront(nil)
+
+            if let destination = NotificationDeepLink.url(forPath: path) {
+                // A native WKWebView load is independent of React's synthetic
+                // click handler, page focus state and DOM virtualization.
+                // If already on this thread, refresh it so the new message
+                // becomes visible even after a long background suspension.
+                if self.webView.url?.path == destination.path {
+                    NSLog("MN NOTI: same-thread tap; native reload")
+                    self.webView.reload()
+                } else {
+                    NSLog("MN NOTI: notification tap; native thread navigation")
+                    self.webView.load(URLRequest(url: destination))
+                }
+                xong()
+                return
+            }
+
+            // Backwards compatibility for old notifications that do not
+            // carry a conversation path. No untrusted URL is ever loaded.
             let escapedID = self.jsonStringForJavaScript(id)
-            let escapedPath = self.jsonStringForJavaScript(path)
-            let javascript = """
-            (function () {
-              if (window.__vmBamThongBao && window.__vmBamThongBao(\(escapedID))) return true;
-              const path = \(escapedPath);
-              if (!/^\\/t\\/[^/]+/.test(path)) return false;
-              const link = Array.from(document.querySelectorAll('a[href*="/t/"]')).find(a => {
-                try { return new URL(a.href, location.href).pathname === path; } catch (_) { return false; }
-              });
-              if (link) { link.click(); return true; }
-              location.href = 'https://www.messenger.com' + path;
-              return true;
-            })()
-            """
-            self.webView.evaluateJavaScript(javascript) { _, error in
-                if let error { NSLog("MN NOTI: open conversation failed (%@)", error.localizedDescription) }
+            let fallback = "Boolean(window.__vmBamThongBao && window.__vmBamThongBao(\(escapedID)))"
+            self.webView.evaluateJavaScript(fallback) { result, error in
+                if let error {
+                    NSLog("MN NOTI: legacy click handler unavailable (%@)", error.localizedDescription)
+                } else if result as? Bool != true {
+                    NSLog("MN NOTI: legacy notification has no conversation path")
+                }
                 xong()
             }
         }
