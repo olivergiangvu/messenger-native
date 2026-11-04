@@ -3,9 +3,10 @@
  * Best-effort DOM fallback when messenger.com does not call Notifications API
  * in WKWebView. No Web Push promise: background JS may still be suspended.
  *
- * Unlike the original timer, this engine ALWAYS tracks a snapshot while the
- * window is focused; it never marks a changed row as notified before deciding
- * whether to deliver. No first-blur or 15-second discard.
+ * Detection is independent of foreground/background/focus state. The
+ * macOS Notification Center decides whether a banner/sound is presented.
+ * The initial snapshot remains silent; unread changes alone are not new
+ * messages. Open conversations can show incoming previews as read immediately.
  */
 (() => {
   if (window.__mnNotificationEngine) return;
@@ -27,10 +28,23 @@
   let scans = 0;
   let sent = 0;
   let seq = 0;
+  let foregroundSent = 0;
+  let selectedChatSent = 0;
+  let selfMessageSkipped = 0;
 
   const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   const metadata = (text) => /^(?:\d+\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|s|m|h|d|w)\s*(?:trước|ago)?|just now|vừa xong|active now|đang hoạt động|·)$/i.test(text);
   const isForeground = () => !document.hidden && document.hasFocus();
+  const normalizedPath = path => String(path || '').replace(/\/+$/, '');
+  const currentlySelected = path =>
+    normalizedPath(path) === normalizedPath(location.pathname);
+
+  // Common first-person prefixes used by Messenger's conversation preview
+  // for an outgoing message. This is a conservative UI hint, not a trusted
+  // server-side sender identity. A message lacking an explicit marker cannot
+  // be reliably classified from the conversation list alone.
+  const ownPreview = /^(?:you|bạn)\s*[:：·]|^(?:you\s+(?:sent|reacted|replied)|bạn\s+(?:đã gửi|đã bày tỏ|đã trả lời))\b/i;
+  const looksSelfAuthored = preview => ownPreview.test(normalize(preview));
 
   // Messenger can put an accessibility/status label such as "Unread message"
   // inside the conversation anchor's rendered text. It is a UI marker, not
@@ -155,7 +169,8 @@
       preview,
       unread: unread(row),
       index,
-      signature: preview + '\u001f' + sender
+      signature: preview + '\u001f' + sender,
+      selfAuthored: looksSelfAuthored(preview)
     };
   }
 
@@ -191,6 +206,8 @@
           nguon: 'dom'
         });
         sent += 1;
+        if (item.foreground) foregroundSent += 1;
+        if (item.selectedChat) selectedChatSent += 1;
         lastEvent = 'sent-dom-notification';
       }
       if (pending.length) setTimeout(tick, 90);
@@ -221,13 +238,23 @@
     let changes = 0;
     for (const item of current) {
       const old = conversations.get(item.path);
-      const changed = !old || old.signature !== item.signature || (!old.unread && item.unread);
-      // A previously unseen row at the top is eligible; old rows exposed by
-      // scrolling or list virtualization further down are not treated as new.
-      const eligible = old ? changed : item.index < 6;
-      if (!foreground && item.unread && eligible && changed) {
-        changes += 1;
-        enqueue(item);
+      // An unread badge changing by itself (e.g. "Mark as unread") is NOT
+      // proof that a new message arrived. Only a changed preview is eligible.
+      const previewChanged = !!old && old.signature !== item.signature;
+      const freshTopUnread = !old && item.index < 6 && item.unread;
+      const selected = currentlySelected(item.path);
+      // A currently opened chat is marked read as soon as the new message
+      // renders, even if the app is foregrounded or merely visible. Its
+      // preview can still prove that the conversation changed.
+      const activeIncoming = selected && previewChanged;
+      const eligible = previewChanged || freshTopUnread;
+      if (eligible && (item.unread || activeIncoming)) {
+        if (item.selfAuthored) {
+          selfMessageSkipped += 1;
+        } else {
+          changes += 1;
+          enqueue({ ...item, foreground, selectedChat: selected });
+        }
       }
       conversations.delete(item.path);
       conversations.set(item.path, { ...item, lastSeen: now });
@@ -279,8 +306,9 @@
   }
 
   window.__mnNotificationStatus = () => ({
-    version: '1.0',
+    version: '1.1-all-window-states',
     initialized, scans, sent, pending: pending.length,
+    foregroundSent, selectedChatSent, selfMessageSkipped,
     trackedConversations: conversations.size,
     observerAttached: !!observer, lastEvent
   });
