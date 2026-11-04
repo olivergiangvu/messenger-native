@@ -60,7 +60,7 @@ const document = {
   addEventListener() {}
 };
 const window = {
-  webkit: { messageHandlers: { vmThongBao: { postMessage(p) { notifications.push(p); } } },
+  webkit: { messageHandlers: { vmThongBao: { postMessage(p) { notifications.push(p); } } } },
   __vmCaiDat: { baoTinNhan: true, boTinGoi: true },
   addEventListener() {}
 };
