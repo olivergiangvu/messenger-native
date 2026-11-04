@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'incoming-call-audio.js'), 'utf8');
 new vm.Script(source, { filename: 'incoming-call-audio.js' });
 
-function harness(pathname) {
+function harness(pathname, mediaSession = null) {
   const messages = [];
   let originalPlays = 0;
   const audios = [];
@@ -31,7 +31,7 @@ function harness(pathname) {
   };
   vm.runInNewContext(source, {
     window, document, location: { pathname },
-    HTMLMediaElement: AudioMedia, Promise,
+    HTMLMediaElement: AudioMedia, Promise, navigator: { mediaSession },
   }, { filename: 'incoming-call-audio.js' });
   return { AudioMedia, window, messages, get originalPlays() { return originalPlays; } };
 }
@@ -44,6 +44,9 @@ function harness(pathname) {
   assert.equal(main.messages.length, 1);
   assert.equal(main.messages[0].amChuongGoiDen, true);
 
+  const mainStatus = main.window.__mnCallAudioStatus();
+  assert.equal(mainStatus.mediaSessionAvailable, false);
+  assert.equal(mainStatus.suppressedWebRingtones, 1);
   const voice = new main.AudioMedia('AUDIO', 'https://example.com/voice-message.ogg');
   const video = new main.AudioMedia('VIDEO', 'https://example.com/video.mp4');
   await voice.play();
@@ -56,6 +59,11 @@ function harness(pathname) {
   assert.equal(voice.paused, false);
   assert.equal(video.paused, false);
 
+  const media = harness('/', { metadata: { title: 'Someone is calling' }, playbackState: 'playing' });
+  const mediaStatus = media.window.__mnCallAudioStatus();
+  assert.equal(mediaStatus.mediaSessionCallTitle, true);
+  assert.equal(mediaStatus.mediaSessionPlaybackState, 'playing');
+  assert.equal(mediaStatus.mediaSessionAvailable, true);
   const call = harness('/groupcall/123');
   await new call.AudioMedia('AUDIO', 'https://static.xx.fbcdn.net/taJw7SpZVz2.mp3').play();
   assert.equal(call.originalPlays, 1, 'Call-window media must not be intercepted');
