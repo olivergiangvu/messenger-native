@@ -64,8 +64,13 @@ Real-device tests after PR #3:
 
 1. **Do not attempt to control the Edge/Facebook ringtone from the native app.** Different processes/browsing contexts do not share a media-control API.
 2. To interrupt the browser-side stuck ringtone without refreshing the chat, **mute the Facebook tab** using the Edge tab's speaker icon or right-click `Mute tab`. This silences the output but does not clear a stale call session; reload may still be needed to reset it.
-3. In Edge, use `edge://media-internals` and DevTools → **Media** to inspect the browser tab's active media player. Do not share full logs without redacting names/URLs/tokens.
+3. In Edge, use `edge://media-internals` and DevTools → **Media** to inspect the Safari Facebook tab's active media player. Do not share full logs without redacting names/URLs/tokens.
 4. Keep the browser's Facebook/Messenger call-receiving session closed for reliability-critical calls while using Messenger Native; merely muting notifications is not equivalent to ending the session.
 5. Avoid deduplicating or hiding call-history UI based on timestamp; two actual calls can legitimately occur in one minute.
 6. Preserve PR #3's native ringtone fix and mobile privacy settings. The new PR #4 does not attempt to fix behavior in an external browser.
 
+
+
+## Browser identification correction
+
+The user confirmed the parallel Facebook browser is **Safari, not Edge**. Safari and Messenger Native both rely on WebKit, but their tab and app processes remain separate playback/control environments. Safari alone reproduces Now Playing and a stuck browser ringtone; Messenger Native alone does not. For a stuck Safari ringtone, mute that tab with the speaker button or reload the Facebook page if the call session remains stuck. Do not infer Messenger Native is the sound source from Facebook artwork alone. Safari Web Inspector: Safari → Settings → Advanced → Show features for web developers, then ⌥⌘I on the Facebook tab. Inspect browser media behavior before changing native call handling.
