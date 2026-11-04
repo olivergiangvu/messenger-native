@@ -187,4 +187,17 @@ assert.equal(received().length, 15, 'Unread toggle or focus change is not a new 
 assert.equal(window.__mnNotificationStatus().foregroundSent, 3);
 assert.equal(window.__mnNotificationStatus().sent, 15);
 
+// Presentation must also be enabled on macOS when the application is active.
+const nativeApp = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'main.swift'), 'utf8');
+assert.match(nativeApp, /xong\(\[\.banner, \.sound, \.list\]\)/,
+  'macOS foreground notification delegate must present banner and sound');
+assert.doesNotMatch(source, /if\s*\(!foreground\s*&&/,
+  'An active app must never be an unconditional notification suppressor');
+const webChimeHandler = nativeApp.slice(
+  nativeApp.indexOf('if d["amBaoTinNhan"] as? Bool == true'),
+  nativeApp.indexOf('guard d["id"] is String')
+);
+assert.doesNotMatch(webChimeHandler, /NSSound\(/,
+  'Native notification sounds must not be doubled by a manual focused-app chime');
+
 console.log('Notification engine: focused, visible, background, open chat auto-read, outgoing suppression, unread-only and preview cleanup passed.');
