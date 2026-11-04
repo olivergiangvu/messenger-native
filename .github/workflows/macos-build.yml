@@ -10,6 +10,7 @@ on:
       - feature/call-permissions-latency
       - feature/stage-manager-localization
       - feature/notification-deeplink
+      - feature/notification-clean-preview
   workflow_dispatch:
 
 concurrency:
@@ -28,6 +29,8 @@ jobs:
           /tmp/mn-routing-tests
           swiftc "Ma nguon/NotificationDeepLink.swift" "Tests/NotificationDeepLinkTests.swift" -o /tmp/mn-notification-deeplink-tests
           /tmp/mn-notification-deeplink-tests
+          swiftc "Ma nguon/NotificationPreviewFormatter.swift" "Tests/NotificationPreviewFormatterTests.swift" -o /tmp/mn-preview-formatter-tests
+          /tmp/mn-preview-formatter-tests
       - name: WebView JavaScript regression
         run: |
           node Tests/ReelPreviewTests.cjs
