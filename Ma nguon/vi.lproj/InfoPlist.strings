@@ -1,0 +1,4 @@
+/* Mô tả quyền riêng tư trên macOS, tiếng Việt */
+"CFBundleDisplayName" = "Messenger Native";
+"NSCameraUsageDescription" = "Cho phép dùng camera cho cuộc gọi video Messenger.";
+"NSMicrophoneUsageDescription" = "Cho phép dùng micro cho cuộc gọi Messenger.";
