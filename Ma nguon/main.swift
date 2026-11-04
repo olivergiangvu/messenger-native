@@ -659,12 +659,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         if d["amBaoTinNhan"] as? Bool == true {
             suppressedWebChimes += 1
-            // A tiny AppKit sound does not create WebKit media sessions.
-            // Background audio is supplied by macOS notification sound to
-            // respect Focus, per-app sound settings and quiet hours.
-            if NSApp.isActive && caiDat("baoTinNhan", true) {
-                _ = NSSound(named: NSSound.Name("Tink"))?.play()
-            }
+            // All states, including when the app is focused, use the native
+            // UNNotification sound to respect macOS Focus and per-app settings.
+            // Do not play an extra AppKit Tink: a foreground banner would
+            // otherwise play twice, and this bypasses quiet notification settings.
             return
         }
         guard d["id"] is String else { return }
@@ -2341,8 +2339,8 @@ extension AppDelegate {
     func trangThongBao() -> NSView {
         trangDoc([
             tieuDeMuc("Tin nhắn", "message"),
-            the([congTac("baoTinNhan", true, "Thông báo tin nhắn khi ứng dụng chạy nền") { [weak self] _ in self?.guiCaiDatChoTrang() },
-                 chuGhi("Theo dõi thay đổi danh sách chat khi Messenger Native vẫn đang chạy nhưng không được sử dụng. Quan sát sự kiện và quét dự phòng mỗi 3,5 giây. Không hoạt động sau khi thoát app hoặc khi WebKit bị đình chỉ. Nội dung xem trước được xử lý tạm thời và có thể được macOS lưu trong Notification Center."),
+            the([congTac("baoTinNhan", true, "Thông báo tin nhắn mới") { [weak self] _ in self?.guiCaiDatChoTrang() },
+                 chuGhi("Thông báo khi có tin nhắn mới dù cửa sổ đang được chọn, hiện trên màn hình, chạy nền hoặc thu nhỏ. Dùng quan sát thay đổi và quét dự phòng 3,5 giây. Chỉ hoạt động khi app còn chạy; có thể bỏ sót nếu WebKit bị đình chỉ. Chế độ Tập trung và thiết lập Thông báo của macOS vẫn được áp dụng."),
                  congTac("boTinGoi", true, "Bỏ thông báo tin về cuộc gọi khi bảng gọi đang hiện") { [weak self] _ in self?.guiCaiDatChoTrang() },
                  chuGhi("Tránh thông báo «đã bắt đầu / đã kết thúc cuộc gọi» trùng với bảng gọi. Vẫn giữ thông báo «cuộc gọi nhỡ».")]),
             tieuDeMuc("Cuộc gọi đến", "phone.arrow.down.left"),
