@@ -9,7 +9,7 @@ APP="$B/Messenger Native.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-swiftc -O -target arm64-apple-macos14.0 "$GOC/main.swift" "$GOC/LinkRouting.swift" "$GOC/NativeNotificationCoordinator.swift" -o "$APP/Contents/MacOS/Messenger" 2>"$B/build.log"
+swiftc -O -target arm64-apple-macos14.0 "$GOC/main.swift" "$GOC/LinkRouting.swift" "$GOC/NativeNotificationCoordinator.swift" "$GOC/IncomingCallRinger.swift" -o "$APP/Contents/MacOS/Messenger" 2>"$B/build.log"
 ec=$?
 if [ $ec -ne 0 ] || grep -q "error:" "$B/build.log"; then
   echo "⛔ build lỗi (exit $ec):"; cat "$B/build.log"; exit 1
@@ -19,6 +19,7 @@ cp "$GOC/Info.plist" "$APP/Contents/Info.plist"
 cp "$GOC/icon.icns" "$APP/Contents/Resources/icon.icns"
 cp "$GOC/reel-preview.js" "$APP/Contents/Resources/reel-preview.js"
 cp "$GOC/notification-engine.js" "$APP/Contents/Resources/notification-engine.js"
+cp "$GOC/incoming-call-audio.js" "$APP/Contents/Resources/incoming-call-audio.js"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # Chứng chỉ ký: biến KY_APP, hoặc file .ky-app cạnh build.sh (không đưa lên GitHub); không có → ký tạm (ad-hoc "-")
