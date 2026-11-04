@@ -11,7 +11,8 @@ final class IncomingCallRinger {
     private var timer: Timer?
     private var startedAt: Date?
     private var lastDialogSeen: Date?
-    private var blockedUntil: Date = .distantPast
+    private var confirmedSessionID: String?
+    private var needsNewSessionAfterStop = false
 
     private(set) var soundCandidates = 0
     private(set) var sessionsStarted = 0
@@ -24,7 +25,9 @@ final class IncomingCallRinger {
     func soundCandidate() {
         soundCandidates += 1
         let now = Date()
-        guard now >= blockedUntil else {
+        // A late/repeated WebKit play() after call completion cannot re-arm
+        // the ringtone. Only a NEW visible call dialog can do that.
+        guard !needsNewSessionAfterStop else {
             duplicateCandidates += 1
             return
         }
@@ -36,9 +39,19 @@ final class IncomingCallRinger {
         begin(now)
     }
 
-    func incomingDialogVisible() {
+    func incomingDialogVisible(sessionID: String) {
+        guard !sessionID.isEmpty else { return }
         let now = Date()
-        guard now >= blockedUntil else { return }
+        if needsNewSessionAfterStop {
+            // Heartbeats from an ended dialog must never re-arm its sound.
+            guard sessionID != confirmedSessionID else { return }
+            needsNewSessionAfterStop = false
+        }
+        if let previous = confirmedSessionID, previous != sessionID, startedAt != nil {
+            stop(reason: "call session changed")
+            needsNewSessionAfterStop = false
+        }
+        confirmedSessionID = sessionID
         if startedAt == nil { begin(now) }
         lastDialogSeen = now
     }
@@ -94,7 +107,7 @@ final class IncomingCallRinger {
         lastDialogSeen = nil
         // Prevent a late WebKit play() or delayed DOM callback from bringing
         // back the ringtone after hangup. A later fresh call can ring.
-        blockedUntil = Date().addingTimeInterval(3)
+        needsNewSessionAfterStop = true
     }
 
     var status: String {
