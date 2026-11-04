@@ -390,7 +390,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let callRinger = IncomingCallRinger()
     var callWindowsByPath: [String: NSWindow] = [:]
     var duplicateCallPopupsBlocked = 0
-    var callMediaSessionsSuppressed = 0
     var lastPermissionRequestResult = "Not yet completed"
     // We no longer retain WKWebView per notification. Conversation navigation
     // is stored in the notification payload and survives a page reload.
@@ -558,11 +557,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return
         }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
-        if d["callMediaSessionSuppressed"] as? Bool == true {
-            callMediaSessionsSuppressed += 1
-            NSLog("MN CALL: incoming caller Media Session metadata suppressed (%d)", callMediaSessionsSuppressed)
-            return
-        }
         if d["amChuongGoiDen"] as? Bool == true, message.webView == webView {
             callRinger.soundCandidate()
             return
@@ -1503,7 +1497,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             \(self.callRinger.status)
             Active call windows: \(self.callWindowsByPath.count)
             Duplicate call popups blocked: \(self.duplicateCallPopupsBlocked)
-            Call Media Session metadata intercepted: \(self.callMediaSessionsSuppressed)
 
             Audio bridge: \((value as? String) ?? "Unavailable: \(error?.localizedDescription ?? "unknown")")
 
