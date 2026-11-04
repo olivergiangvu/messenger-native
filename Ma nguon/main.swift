@@ -188,7 +188,8 @@ let jsThongBao = """
     lanBaoGoi = Date.now();
     guiSwift({ goiDen: nguon });   // Dock nảy; bảng "Cuộc gọi đến" do đoạn dò hộp bên dưới gửi
   };
-  const amDangPhat = new Set();   // âm thanh trang chính đang phát (để tắt chuông còn sót khi hộp gọi đến đóng)
+  // Only report audio for diagnostics here. Incoming-call ringtone interception
+  // happens in incoming-call-audio.js, after this wrapper at documentStart.
   const phatGoc = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function () {
     // Confirmed Messenger incoming-message chime. WebKit registers this very
@@ -199,12 +200,6 @@ let jsThongBao = """
         !/groupcall/.test(location.pathname)) {
       guiSwift({ amBaoTinNhan: true });
       return Promise.resolve();
-    }
-    if (this.tagName === 'AUDIO' && !/groupcall/.test(location.pathname) && !amDangPhat.has(this)) {
-      amDangPhat.add(this);
-      const ten = String(this.currentSrc || this.src || '').split('?')[0].split('/').pop();
-      this.addEventListener('pause', () => { amDangPhat.delete(this); guiSwift({ nhatKy: 'DÒ TB: âm ' + ten + ' dừng (trang gọi pause)' }); }, { once: true });
-      this.addEventListener('ended', () => { amDangPhat.delete(this); }, { once: true });
     }
     const ten = String(this.currentSrc || this.src || '').split('?')[0].split('/').pop() || '(luồng)';
     // Chuông gọi đến ở trang chat chính = taJw7SpZVz2.mp3 (dò cuộc gọi thật 03/11 08:56, 09:00).
@@ -245,12 +240,18 @@ let jsThongBao = """
     }).filter(d => d && d.diem >= 1.5).sort((x, y) => y.diem - x.diem);
     return ung.length ? ung[0].ten : '';
   };
-  let hopCu = '', kieuGoi = 'thoai';
+  let hopCu = '', kieuGoi = 'thoai', hopMatLuc = 0, lanNhipGoi = 0;
   setInterval(() => tinhTon('hộp gọi', () => {
     const nut = nutGoiDen('Chấp nhận') || nutGoiDen('Accept');
     const hop = nut ? nut.closest('[role="dialog"], [role="alertdialog"]') : null;
     if (hop) {
-      window.__vmGoiLuc = Date.now();
+      hopMatLuc = 0;
+      const nay = Date.now();
+      if (nay - lanNhipGoi > 2200) {
+        lanNhipGoi = nay;
+        guiSwift({ goiDangDo: true });
+      }
+      window.__vmGoiLuc = nay;
       const dong = (hop.innerText || '').split('\\n').map(t => t.trim()).filter(Boolean);
       // Gọi 1-1: "X đang gọi cho bạn". Gọi NHÓM (dò 03/11 09:33): "X đã mời bạn tham gia cuộc gọi nhóm" (thoại) /
       // "… tham gia nhóm chat video" (video) – hộp KHÔNG có tên nhóm → lấy tên từ dòng chat nhóm (tenNhomGoi).
@@ -275,20 +276,21 @@ let jsThongBao = """
         hopCu = khoa; guiSwift({ goiDenHien: { chu, anh, video: kieuGoi === 'video', nhom: laNhom } });
       }
     } else if (hopCu) {
-      hopCu = ''; window.__vmGoiLuc = Date.now(); guiSwift({ goiDenAn: true });
-      // Chuông còn kêu sau khi hộp đóng (anh báo 03/11: tắt cuộc gọi rồi vẫn kêu) → chờ 1,5 giây cho trang tự tắt, còn thì tắt hộ
-      // (dò 08:56: chuông XFhtdTsftOC còn bắt đầu kêu 0,5s SAU khi hộp đóng → kiểm 3 lần, bỏ qua nếu đã có cuộc gọi mới)
-      [1500, 3000, 6000].forEach(ms => setTimeout(() => {
-        if (hopCu) return;
-        const con = [...amDangPhat].filter(a => !a.paused);
-        con.forEach(a => { a.pause(); a.currentTime = 0; });
-        if (con.length || ms === 1500) guiSwift({ nhatKy: 'DÒ TB: hộp gọi đến đã đóng ' + ms + 'ms, chuông còn kêu=' + con.length + (con.length ? ' → đã tắt hộ' : '') });
-      }, ms));
+      // Messenger may re-render the incoming-call modal temporarily. Debounce
+      // disappearance to prevent duplicate incoming-call sessions/entries.
+      if (!hopMatLuc) hopMatLuc = Date.now();
+      if (Date.now() - hopMatLuc >= 1100) {
+        hopCu = '';
+        hopMatLuc = 0;
+        window.__vmGoiLuc = Date.now();
+        guiSwift({ goiDenAn: true });
+      }
     }
   }), 700);
   window.__vmBamGoiDen = (nhan) => {
     const e = nutGoiDen(nhan) || nutGoiDen(nhan === 'Chấp nhận' ? 'Accept' : 'Decline');
     if (!e) return 'không thấy nút ' + nhan;
+    guiSwift({ chuongGoiDung: true });
     e.click(); return 'đã bấm ' + nhan;
   };
 
@@ -381,6 +383,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var cuaSoPhu: [NSWindow] = []   // cửa sổ bật lên (vd. cuộc gọi video)
     let nativeNotifications = NativeNotificationCoordinator()
     var suppressedWebChimes = 0
+    let callRinger = IncomingCallRinger()
+    var callWindowsByPath: [String: NSWindow] = [:]
+    var duplicateCallPopupsBlocked = 0
     var lastPermissionRequestResult = "Not yet completed"
     // We no longer retain WKWebView per notification. Conversation navigation
     // is stored in the notification payload and survives a page reload.
@@ -460,6 +465,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             WKUserScript(source: jsCaiDat(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cauHinh.userContentController.addUserScript(
             WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        if let callURL = Bundle.main.url(forResource: "incoming-call-audio", withExtension: "js"),
+           let callScript = try? String(contentsOf: callURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: callScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            NSLog("MN CALL: native ringtone bridge injected")
+        } else {
+            NSLog("MN CALL ERROR: missing incoming-call-audio.js")
+        }
         if let engineURL = Bundle.main.url(forResource: "notification-engine", withExtension: "js"),
            let engine = try? String(contentsOf: engineURL, encoding: .utf8) {
             cauHinh.userContentController.addUserScript(
@@ -540,11 +553,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return
         }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
+        if d["amChuongGoiDen"] as? Bool == true, message.webView == webView {
+            callRinger.soundCandidate()
+            return
+        }
+        if d["chuongGoiDung"] as? Bool == true, message.webView == webView {
+            callRinger.stop(reason: "call accepted or declined")
+            return
+        }
+        if d["goiDangDo"] as? Bool == true, message.webView == webView {
+            callRinger.incomingDialogVisible()
+            return
+        }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
+            callRinger.incomingDialogVisible()
             if goiDen == nil, !NSApp.isActive, caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }   // chỉ cuộc gọi mới nảy Dock
             goiDen = (g["chu"] as? String ?? "Có người đang gọi cho bạn", g["anh"] as? String ?? "", g["video"] as? Bool ?? false, g["nhom"] as? Bool ?? false); capNhatBangGoi(); return
         }
-        if d["goiDenAn"] != nil, message.webView == webView { goiDen = nil; capNhatBangGoi(); return }
+        if d["goiDenAn"] != nil, message.webView == webView {
+            callRinger.stop(reason: "incoming call dialog closed")
+            goiDen = nil; capNhatBangGoi(); return
+        }
         if let ng = d["goiDen"] as? String {
             NSLog("VM: TB cuộc gọi đến (%@)%@", ng, caiDat("dockNayGoi", true) ? " → Dock nảy" : "")
             if caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }
@@ -616,6 +645,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 xong()
             }
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        callRinger.stop(reason: "application termination")
     }
 
     // Bấm biểu tượng ở Dock khi cửa sổ đang ẩn → hiện lại
@@ -806,6 +839,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let duong = (webView.url?.host ?? "?") + (webView.url?.path ?? "").replacingOccurrences(of: "[0-9]{5,}", with: "N", options: .regularExpression)
         NSLog("VM: tải xong %@ – %@", duong, webView.title ?? "")
         if webView.url?.path.contains("/groupcall/") == true, let w = webView.window, w != window {
+            callRinger.stop(reason: "call session window navigated")
             if pip[ObjectIdentifier(w)] == nil { pip[ObjectIdentifier(w)] = TrangThaiPiP() }
             ghiPidDo(webView)
         }
@@ -1167,6 +1201,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             webView.startDownload(using: action.request) { [weak self] d in d.delegate = self; self?.dangTai.append(d) }
             return nil
         }
+        // A duplicate window.open for the same call path must not launch a
+        // second WebRTC session. Never return an existing WKWebView here:
+        // WebKit requires a newly created view with the supplied configuration.
+        let callPath = target.path.contains("/groupcall/") ? target.path : nil
+        if let callPath, let existing = callWindowsByPath[callPath], existing.isVisible {
+            duplicateCallPopupsBlocked += 1
+            existing.makeKeyAndOrderFront(nil)
+            NSLog("MN CALL: duplicate popup blocked (count=%d)", duplicateCallPopupsBlocked)
+            return nil
+        }
         NSLog("VM: GỌI? cửa sổ phụ mở: %@%@", url.host ?? "", url.path.replacingOccurrences(of: "[0-9]{5,}", with: "N", options: .regularExpression))
 
         // Link nội bộ (vd. cuộc gọi) → mở cửa sổ phụ dùng chung cookie
@@ -1180,6 +1224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         w.center()
         w.makeKeyAndOrderFront(nil)
         cuaSoPhu.append(w)
+        if let callPath {
+            callWindowsByPath[callPath] = w
+            callRinger.stop(reason: "accepted call popup opened")
+        }
         return wv
     }
 
@@ -1603,6 +1651,7 @@ extension AppDelegate {
         }
     }
     func bamGoiDen(_ nhan: String) {
+        callRinger.stop(reason: "floating call action: " + nhan)
         webView.evaluateJavaScript("window.__vmBamGoiDen && window.__vmBamGoiDen('\(nhan)')") { kq, _ in
             NSLog("VM: BẢNG gọi đến → %@", "\(kq ?? "")")
         }
@@ -1931,6 +1980,7 @@ extension AppDelegate {
         guard let w = n.object as? NSWindow, w != window else { return }
         if laCuocGoi(w) { NSLog("VM: ĐO cửa sổ cuộc gọi đóng") }
         pip[ObjectIdentifier(w)] = nil
+        callWindowsByPath = callWindowsByPath.filter { $0.value !== w }
         cuaSoPhu.removeAll { $0 == w }
     }
 
