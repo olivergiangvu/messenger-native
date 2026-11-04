@@ -7,6 +7,7 @@ on:
       - feature/link-routing-reels
       - feature/notification-nowplaying
       - feature/call-ringtone-lifecycle
+      - feature/call-permissions-latency
   workflow_dispatch:
 
 concurrency:
@@ -28,6 +29,14 @@ jobs:
           node Tests/ReelPreviewTests.cjs
           node Tests/NotificationEngineTests.cjs
           node Tests/IncomingCallAudioTests.cjs
+          node Tests/MenuLocalizationTests.cjs
+      - name: Validate macOS localization resources
+        run: |
+          plutil -lint "Ma nguon/en.lproj/Menu.strings"
+          plutil -lint "Ma nguon/vi.lproj/Menu.strings"
+          plutil -lint "Ma nguon/en.lproj/InfoPlist.strings"
+          plutil -lint "Ma nguon/vi.lproj/InfoPlist.strings"
+          plutil -lint "Ma nguon/Info.plist"
       - name: Validate developer installer shell syntax
         run: bash -n install-local.sh
       - name: Build unsigned test application (ad hoc)
@@ -38,3 +47,7 @@ jobs:
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-engine.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/reel-preview.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/incoming-call-audio.js"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/en.lproj/Menu.strings"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/vi.lproj/Menu.strings"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/en.lproj/InfoPlist.strings"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/vi.lproj/InfoPlist.strings"
