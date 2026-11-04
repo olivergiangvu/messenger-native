@@ -107,3 +107,5 @@
 "Chưa thể cấp quyền thông báo" = "Unable to Obtain Notification Permission";
 "Đã cấp quyền thông báo" = "Notification Permission Granted";
 "Tắt chuông ngay" = "Stop Ringing Now";
+"Thông báo tin nhắn mới" = "New message notifications";
+"Thông báo khi có tin nhắn mới dù cửa sổ đang được chọn, hiện trên màn hình, chạy nền hoặc thu nhỏ. Dùng quan sát thay đổi và quét dự phòng 3,5 giây. Chỉ hoạt động khi app còn chạy; có thể bỏ sót nếu WebKit bị đình chỉ. Chế độ Tập trung và thiết lập Thông báo của macOS vẫn được áp dụng." = "Show notifications for new messages whether Messenger Native is focused, visible, backgrounded or minimized. Detect changes with event observation and a 3.5-second recovery scan. Works only while the app is running; WebKit suspension may delay or miss events. macOS Focus and notification settings still apply.";
