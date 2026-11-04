@@ -50,7 +50,7 @@ struct NotificationPreviewFormatterTests {
         assert(emojiRoundTrip.body == emojiBody)
         assert(!emojiRoundTrip.removedUnreadLabel)
 
-        let afterUnreadBadge = preview("Unread message\\nAlice 😄", "", "Unread message\\nOk 👍🏽")
+        let afterUnreadBadge = preview("Unread message\nAlice 😄", "", "Unread message\nOk 👍🏽")
         assert(afterUnreadBadge.title == "Alice 😄")
         assert(afterUnreadBadge.body == "Ok 👍🏽")
         assert(afterUnreadBadge.removedUnreadLabel)
