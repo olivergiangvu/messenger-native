@@ -241,15 +241,18 @@ let jsThongBao = """
     return ung.length ? ung[0].ten : '';
   };
   let hopCu = '', kieuGoi = 'thoai', hopMatLuc = 0, lanNhipGoi = 0;
+  let phienGoi = '', soPhienGoi = 0;
   setInterval(() => tinhTon('hộp gọi', () => {
     const nut = nutGoiDen('Chấp nhận') || nutGoiDen('Accept');
     const hop = nut ? nut.closest('[role="dialog"], [role="alertdialog"]') : null;
     if (hop) {
       hopMatLuc = 0;
       const nay = Date.now();
+      // Stable opaque token per detected call dialog. Do not transmit names.
+      if (!phienGoi) phienGoi = 'mn-call-' + nay + '-' + (++soPhienGoi);
       if (nay - lanNhipGoi > 2200) {
         lanNhipGoi = nay;
-        guiSwift({ goiDangDo: true });
+        guiSwift({ goiDangDo: phienGoi });
       }
       window.__vmGoiLuc = nay;
       const dong = (hop.innerText || '').split('\\n').map(t => t.trim()).filter(Boolean);
@@ -273,7 +276,7 @@ let jsThongBao = """
             ', chữ=' + JSON.stringify(cheTen) + ', hìnhNút=' + ve + ' → gọi ' + kieuGoi + (laNhom ? ' NHÓM' : '') });
         }
         if (laNhom) guiSwift({ nhatKy: 'DÒ TB: gọi nhóm – tên nhóm ' + (tenNhom ? 'đã tìm thấy (' + tenNhom.length + ' ký tự)' : 'CHƯA thấy') });
-        hopCu = khoa; guiSwift({ goiDenHien: { chu, anh, video: kieuGoi === 'video', nhom: laNhom } });
+        hopCu = khoa; guiSwift({ goiDenHien: { chu, anh, video: kieuGoi === 'video', nhom: laNhom, phien: phienGoi } });
       }
     } else if (hopCu) {
       // Messenger may re-render the incoming-call modal temporarily. Debounce
@@ -282,6 +285,7 @@ let jsThongBao = """
       if (Date.now() - hopMatLuc >= 1100) {
         hopCu = '';
         hopMatLuc = 0;
+        phienGoi = '';
         window.__vmGoiLuc = Date.now();
         guiSwift({ goiDenAn: true });
       }
@@ -561,12 +565,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             callRinger.stop(reason: "call accepted or declined")
             return
         }
-        if d["goiDangDo"] as? Bool == true, message.webView == webView {
-            callRinger.incomingDialogVisible()
+        if let session = d["goiDangDo"] as? String, message.webView == webView {
+            callRinger.incomingDialogVisible(sessionID: session)
             return
         }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
-            callRinger.incomingDialogVisible()
+            callRinger.incomingDialogVisible(sessionID: g["phien"] as? String ?? "")
             if goiDen == nil, !NSApp.isActive, caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }   // chỉ cuộc gọi mới nảy Dock
             goiDen = (g["chu"] as? String ?? "Có người đang gọi cho bạn", g["anh"] as? String ?? "", g["video"] as? Bool ?? false, g["nhom"] as? Bool ?? false); capNhatBangGoi(); return
         }
