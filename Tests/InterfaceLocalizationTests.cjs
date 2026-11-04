@@ -29,10 +29,9 @@ assert.equal(en.get('Thông báo'), 'Notifications');
 assert.equal(en.get('Cuộc gọi'), 'Calls');
 assert.equal(en.get('Tải file'), 'Downloads');
 assert.equal(en.get('Chung'), 'General');
-assert.equal(en.get('Thông báo tin nhắn khi ứng dụng chạy nền'),
-  'Message notifications while running in the background');
-assert.ok(en.get('Theo dõi thay đổi danh sách chat khi Messenger Native vẫn đang chạy nhưng không được sử dụng. Quan sát sự kiện và quét dự phòng mỗi 3,5 giây. Không hoạt động sau khi thoát app hoặc khi WebKit bị đình chỉ. Nội dung xem trước được xử lý tạm thời và có thể được macOS lưu trong Notification Center.')
-  .includes('3.5-second'));
+assert.equal(en.get('Thông báo tin nhắn mới'), 'New message notifications');
+assert.ok(en.get('Thông báo khi có tin nhắn mới dù cửa sổ đang được chọn, hiện trên màn hình, chạy nền hoặc thu nhỏ. Dùng quan sát thay đổi và quét dự phòng 3,5 giây. Chỉ hoạt động khi app còn chạy; có thể bỏ sót nếu WebKit bị đình chỉ. Chế độ Tập trung và thiết lập Thông báo của macOS vẫn được áp dụng.')
+  .includes('focused, visible, backgrounded or minimized'));
 
 const swift = fs.readFileSync(path.join(root, 'main.swift'), 'utf8');
 const permissions = fs.readFileSync(path.join(root, 'CallMediaPermissions.swift'), 'utf8');
@@ -42,7 +41,7 @@ assert.match(localizer, /Bundle\.main\.localizedString\(forKey: key, value: key,
 assert.match(localizer, /String\(format: ui\(key\), locale: Locale\.current, arguments: arguments\)/);
 assert.match(swift, /"Thông báo", "Cuộc gọi", "Tải file", "Chung"\]\.map\(MenuLocalization\.ui\)/);
 assert.match(swift, /MenuLocalization\.uiFormat\("Cài đặt %@", tenApp\)/);
-assert.match(swift, /congTac\("baoTinNhan", true, "Thông báo tin nhắn khi ứng dụng chạy nền"\)/);
+assert.match(swift, /congTac\("baoTinNhan", true, "Thông báo tin nhắn mới"\)/);
 assert.doesNotMatch(swift, /App tự xem danh sách chat 2 giây\/lần/);
 assert.match(permissions, /MenuLocalization\.ui\("Đã cho phép"\)/);
 
