@@ -12,6 +12,7 @@
 import Cocoa
 import WebKit
 import UserNotifications
+import AVFoundation
 import ServiceManagement
 import CryptoKit
 
@@ -2232,8 +2233,34 @@ extension AppDelegate {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!) }),
         ])
     }
+    func lamMoiTrangQuyenGoi() {
+        guard let tab = cuaSoCaiDat?.contentView?.viewWithTag(77) as? NSSegmentedControl,
+              tab.selectedSegment == 1 else { return }
+        chonTab(tab)
+    }
+
+    func dongQuyenThietBi(_ title: String, media: AVMediaType) -> NSView {
+        let state = CallMediaPermissions.status(for: media)
+        let detail = chuGhi(title + ": " + CallMediaPermissions.label(for: media))
+        if state == .notDetermined {
+            return dong(detail, nut("Cho phép") { [weak self] in
+                CallMediaPermissions.request(media) {
+                    self?.lamMoiTrangQuyenGoi()
+                }
+            })
+        }
+        return dong(detail, nut(state == .authorized ? "Xem quyền" : "Mở Cài đặt macOS") {
+            CallMediaPermissions.openPrivacySettings(for: media)
+        })
+    }
+
     func trangCuocGoi() -> NSView {
         trangDoc([
+            tieuDeMuc("Quyền thiết bị — cấp trước cuộc gọi đầu tiên", "lock.shield"),
+            the([dongQuyenThietBi("Microphone", media: .audio),
+                 dongQuyenThietBi("Camera", media: .video),
+                 chuGhi("Chọn Cho phép để macOS hỏi quyền ngay, không cần đợi cuộc gọi đầu tiên. Thao tác này không tự bật micro, camera hoặc ghi âm. Khi bị từ chối, mở Cài đặt hệ thống để thay đổi."),
+                 chuGhi("Quyền của macOS và quyền truy cập của trang Messenger bên trong WebKit là hai bước riêng; trang web vẫn chỉ được phép dùng thiết bị khi bắt đầu cuộc gọi.")]),
             tieuDeMuc("Thu nhỏ cuộc gọi (PiP)", "pip"),
             the([congTac("tuPiP", true, "Tự thu nhỏ cuộc gọi khi chuyển app / bấm sang cửa sổ chat"),
                  chuGhi("Cửa sổ gọi thu nhỏ 360×240, nổi trên mọi app, kể cả khi chia sẻ màn hình. Nút xanh hoặc ⇧⌘P để phóng to lại.")]),
