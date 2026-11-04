@@ -39,8 +39,19 @@
     return playOriginal.apply(this, args);
   };
 
+  window.__mnStopIncomingRingtone = () => {
+    let stopped = 0;
+    document.querySelectorAll('audio').forEach((audio) => {
+      if (!isIncomingRingtone(audio)) return;
+      audio.pause();
+      try { audio.currentTime = 0; } catch (_) {}
+      stopped++;
+    });
+    return stopped;
+  };
+
   window.__mnCallAudioStatus = () => ({
-    version: '1.0',
+    version: '1.1',
     installed: true,
     suppressedWebRingtones: suppressed
   });
