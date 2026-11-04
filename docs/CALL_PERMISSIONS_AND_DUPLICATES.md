@@ -48,3 +48,24 @@ If local branch exists, use `git switch feature/call-permissions-latency && git 
 Then navigate to Messenger Native → **Cài đặt… → Cuộc gọi**, click **Cho phép** for each permission. Verify states change to "Đã cho phép" after granting permission. Test one incoming call with the browser fully closed, then inspect **Xem → Call Diagnostics…** to verify the observer is attached.
 
 **No Node.js installation is required** to build/use the app; CI runs JavaScript regression tests. This PR remains draft until macOS CI and actual tests are complete.
+
+## Observed results — 2026-11-04
+
+Real-device tests after PR #3:
+
+- Messenger mobile shows **one** call-history entry when the desktop view has two.
+- With Messenger Native **alone**, incoming calls do not create Now Playing.
+- Facebook Web in the browser **alone** can create Now Playing; with both clients running, it also appears.
+- Ghost ringtone persists in **the browser tab**, not in Messenger Native. Messenger Native's **Stop Ringing Now** does not and cannot stop audio from Edge; the user has had to reload the Facebook tab.
+- Native Call Diagnostics after the call: `Active=false`, `Started=2`, `Stopped=2`, `suppressedWebRingtones=2`, `Duplicate call popups blocked=0`, `observerAttached=true`, `incomingDialogActive=false`.
+- These counters show the native ringtone lifecycle ended normally. The double-entry cause remains unproven: one mobile entry reduces the evidence for account-wide duplicated records but does not distinguish local duplicate rendering from two desktop-client call events.
+
+### Safe containment and investigation
+
+1. **Do not attempt to control the Edge/Facebook ringtone from the native app.** Different processes/browsing contexts do not share a media-control API.
+2. To interrupt the browser-side stuck ringtone without refreshing the chat, **mute the Facebook tab** using the Edge tab's speaker icon or right-click `Mute tab`. This silences the output but does not clear a stale call session; reload may still be needed to reset it.
+3. In Edge, use `edge://media-internals` and DevTools → **Media** to inspect the browser tab's active media player. Do not share full logs without redacting names/URLs/tokens.
+4. Keep the browser's Facebook/Messenger call-receiving session closed for reliability-critical calls while using Messenger Native; merely muting notifications is not equivalent to ending the session.
+5. Avoid deduplicating or hiding call-history UI based on timestamp; two actual calls can legitimately occur in one minute.
+6. Preserve PR #3's native ringtone fix and mobile privacy settings. The new PR #4 does not attempt to fix behavior in an external browser.
+
