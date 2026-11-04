@@ -32,9 +32,21 @@
   const metadata = (text) => /^(?:\d+\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|s|m|h|d|w)\s*(?:trước|ago)?|just now|vừa xong|active now|đang hoạt động|·)$/i.test(text);
   const isForeground = () => !document.hidden && document.hasFocus();
 
+  // Messenger can put an accessibility/status label such as "Unread message"
+  // inside the conversation anchor's rendered text. It is a UI marker, not
+  // message content, and makes macOS banners unnecessarily verbose.
+  // Only remove a standalone status line that is NOT the final preview line:
+  // if somebody literally sends "Unread message", keep that message intact.
+  const unreadStatusLine = /^(?:(?:\d+\s+)?unread\s+messages?|(?:\d+\s+)?tin\s+nhắn\s+chưa\s+đọc)$/i;
+  function cleanPreviewLines(parts) {
+    return parts.filter((part, index) =>
+      !(unreadStatusLine.test(part) && index <= 1 && index < parts.length - 1));
+  }
+
   function textLines(element) {
     const raw = (element.innerText || element.textContent || '');
-    return raw.split(/\n/).map(normalize).filter((part) => part && !metadata(part));
+    const parts = raw.split(/\n/).map(normalize).filter((part) => part && !metadata(part));
+    return cleanPreviewLines(parts);
   }
 
   function unread(row) {

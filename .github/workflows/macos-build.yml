@@ -9,6 +9,7 @@ on:
       - feature/call-ringtone-lifecycle
       - feature/call-permissions-latency
       - feature/stage-manager-localization
+      - feature/notification-deeplink
   workflow_dispatch:
 
 concurrency:
