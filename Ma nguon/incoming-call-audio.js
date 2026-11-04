@@ -56,7 +56,7 @@
     const ms = (typeof navigator !== 'undefined' && navigator.mediaSession)
       ? navigator.mediaSession : null;
     const title = String(ms && ms.metadata && ms.metadata.title || '');
-    const callMetadata = /(?:\\bis calling\\b|\\bcalling you\\b|\\bincoming (?:audio|video )?call\\b|đang gọi|cuộc gọi đến|gọi đến)/i.test(title);
+    const callMetadata = /(?:\bis calling\b|\bcalling you\b|\bincoming (?:audio|video )?call\b|đang gọi|cuộc gọi đến|gọi đến)/i.test(title);
     return {
       version: '1.3-readonly-origin',
       installed: true,
