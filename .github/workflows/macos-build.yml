@@ -8,6 +8,7 @@ on:
       - feature/notification-nowplaying
       - feature/call-ringtone-lifecycle
       - feature/call-permissions-latency
+      - feature/stage-manager-localization
   workflow_dispatch:
 
 concurrency:
@@ -24,6 +25,8 @@ jobs:
         run: |
           swiftc "Ma nguon/LinkRouting.swift" "Tests/LinkRoutingTests.swift" -o /tmp/mn-routing-tests
           /tmp/mn-routing-tests
+          swiftc "Ma nguon/NotificationDeepLink.swift" "Tests/NotificationDeepLinkTests.swift" -o /tmp/mn-notification-deeplink-tests
+          /tmp/mn-notification-deeplink-tests
       - name: WebView JavaScript regression
         run: |
           node Tests/ReelPreviewTests.cjs
