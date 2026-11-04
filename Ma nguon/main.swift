@@ -543,6 +543,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSLog("MN NOTI ERROR: missing notification-engine.js")
         }
 
+        if let navURL = Bundle.main.url(forResource: "notification-navigation", withExtension: "js"),
+           let navScript = try? String(contentsOf: navURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: navScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            NSLog("MN NOTI: in-page conversation navigation injected")
+        } else {
+            NSLog("MN NOTI ERROR: missing notification-navigation.js")
+        }
+
         // Intercept at documentStart, before Messenger's React click handlers.
         // No extra WKWebView is created for a Reel thumbnail.
         if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
@@ -692,16 +701,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             self.window.makeKeyAndOrderFront(nil)
 
             if let destination = NotificationDeepLink.url(forPath: path) {
-                // A native WKWebView load is independent of React's synthetic
-                // click handler, page focus state and DOM virtualization.
-                // If already on this thread, refresh it so the new message
-                // becomes visible even after a long background suspension.
-                if self.webView.url?.path == destination.path {
-                    NSLog("MN NOTI: same-thread tap; native reload")
-                    self.webView.reload()
-                } else {
-                    NSLog("MN NOTI: notification tap; native thread navigation")
-                    self.webView.load(URLRequest(url: destination))
+                // Wait briefly for the app to regain foreground focus before
+                // asking Messenger's own in-page link router to change chat.
+                // No WKWebView.load/reload: keep the document and drafts alive.
+                let escapedPath = self.jsonStringForJavaScript(destination.path)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    guard let self else { return }
+                    let script = """
+                    window.__mnNotificationNavigation
+                      ? window.__mnNotificationNavigation.open(\(escapedPath))
+                      : 'navigation-module-missing'
+                    """
+                    self.webView.evaluateJavaScript(script) { result, error in
+                        if let error {
+                            NSLog("MN NOTI: in-page navigation failed (%@)", error.localizedDescription)
+                        } else {
+                            NSLog("MN NOTI: in-page navigation %@", (result as? String) ?? "unknown")
+                        }
+                    }
                 }
                 xong()
                 return
