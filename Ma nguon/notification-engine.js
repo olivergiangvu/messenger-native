@@ -40,7 +40,7 @@
   const unreadStatusLine = /^(?:(?:\d+\s+)?unread\s+messages?|(?:\d+\s+)?tin\s+nhắn\s+chưa\s+đọc)$/i;
   function cleanPreviewLines(parts) {
     return parts.filter((part, index) =>
-      !(unreadStatusLine.test(part) && index < parts.length - 1));
+      !(unreadStatusLine.test(part) && index <= 1 && index < parts.length - 1));
   }
 
   function textLines(element) {
