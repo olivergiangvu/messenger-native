@@ -42,6 +42,19 @@ struct NotificationPreviewFormatterTests {
         assert(middleNotHeader.body == "Hello\nUnread message\nFollow-up")
         assert(!middleNotHeader.removedUnreadLabel)
 
+        // Unicode emoji including skin tones, ZWJ groups, flags and symbols
+        // must remain intact at the final native notification boundary.
+        let emojiBody = "Hẹn nhé 😊👩🏽‍💻🇻🇳❤️"
+        let emojiRoundTrip = preview("Alice 🥳", "", emojiBody)
+        assert(emojiRoundTrip.title == "Alice 🥳")
+        assert(emojiRoundTrip.body == emojiBody)
+        assert(!emojiRoundTrip.removedUnreadLabel)
+
+        let afterUnreadBadge = preview("Unread message\nAlice 😄", "", "Unread message\nOk 👍🏽")
+        assert(afterUnreadBadge.title == "Alice 😄")
+        assert(afterUnreadBadge.body == "Ok 👍🏽")
+        assert(afterUnreadBadge.removedUnreadLabel)
+
         print("Native notification preview formatter tests passed")
     }
 }

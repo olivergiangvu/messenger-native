@@ -43,8 +43,69 @@
       !(unreadStatusLine.test(part) && index <= 1 && index < parts.length - 1));
   }
 
+  // Messenger sometimes renders Unicode emoji as small inline <img alt="😊">
+  // or <span role="img" aria-label="👨‍👩‍👧"> rather than text nodes.
+  // innerText/textContent omit those images, producing incomplete banners.
+  // Recognize actual emoji codepoints only: never substitute avatar names,
+  // arbitrary image alt text, stickers or attached media descriptions.
+  const emojiCodepoint = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u;
+  const emojiOnly = /^[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u200d\ufe0e\ufe0f\u20e3#*0-9\s]+$/u;
+  const blockTag = /^(?:DIV|P|LI|SECTION|ARTICLE|HEADER|FOOTER|H[1-6])$/;
+
+  function emojiAlt(node) {
+    if (!node || typeof node.getAttribute !== 'function') return '';
+    const tag = String(node.tagName || '').toUpperCase();
+    const role = node.getAttribute('role');
+    if (tag !== 'IMG' && role !== 'img') return '';
+    const raw = normalize(node.getAttribute('alt') || node.getAttribute('aria-label') ||
+                          node.getAttribute('data-emoji') || '');
+    return raw.length > 0 && raw.length <= 80 &&
+           emojiCodepoint.test(raw) && emojiOnly.test(raw) ? raw : '';
+  }
+
+  function textWithInlineEmoji(element) {
+    if (typeof element.querySelectorAll !== 'function' || !element.childNodes) return null;
+    const candidates = element.querySelectorAll('img[alt], [role="img"][aria-label], [data-emoji]');
+    if (!Array.from(candidates).some(emojiAlt)) return null;
+
+    let visited = 0;
+    let recovered = 0;
+    const tokens = [];
+    function visit(node, depth) {
+      if (!node || ++visited > 350 || depth > 32) return;
+      if (node.nodeType === 3) {
+        tokens.push((node.nodeValue || '').replace(/\s+/g, ' '));
+        return;
+      }
+      if (node.nodeType !== 1) return;
+
+      const tag = String(node.tagName || '').toUpperCase();
+      const emoji = emojiAlt(node);
+      if (emoji) {
+        tokens.push(emoji);
+        recovered++;
+        return;
+      }
+      if (/^(?:IMG|SVG|SCRIPT|STYLE|NOSCRIPT)$/.test(tag)) return;
+      if (node !== element) {
+        if (node.hidden || (node.getAttribute && node.getAttribute('aria-hidden') === 'true')) return;
+        if (typeof getComputedStyle === 'function') {
+          const style = getComputedStyle(node);
+          if (style.display === 'none' || style.visibility === 'hidden') return;
+        }
+      }
+      if (tag === 'BR') { tokens.push('\n'); return; }
+      const block = node !== element && blockTag.test(tag);
+      if (block) tokens.push('\n');
+      for (const child of node.childNodes || []) visit(child, depth + 1);
+      if (block) tokens.push('\n');
+    }
+    visit(element, 0);
+    return recovered ? tokens.join('') : null;
+  }
+
   function textLines(element) {
-    const raw = (element.innerText || element.textContent || '');
+    const raw = textWithInlineEmoji(element) || (element.innerText || element.textContent || '');
     const parts = raw.split(/\n/).map(normalize).filter((part) => part && !metadata(part));
     return cleanPreviewLines(parts);
   }
