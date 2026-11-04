@@ -447,6 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let callRinger = IncomingCallRinger()
     var callWindowsByPath: [String: NSWindow] = [:]
     var duplicateCallPopupsBlocked = 0
+    var floatingCallHandoffs = 0
     var lastPermissionRequestResult = "Not yet completed"
     // We no longer retain WKWebView per notification. Conversation navigation
     // is stored in the notification payload and survives a page reload.
@@ -1554,6 +1555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             \(self.callRinger.status)
             Active call windows: \(self.callWindowsByPath.count)
             Duplicate call popups blocked: \(self.duplicateCallPopupsBlocked)
+            Floating call actions handed to in-page dialog: \(self.floatingCallHandoffs)
 
             Audio bridge: \((value as? String) ?? "Unavailable: \(error?.localizedDescription ?? "unknown")")
 
@@ -1699,7 +1701,11 @@ final class BangGoiDen: NSPanel {
         chu.maximumNumberOfLines = 2; chu.cell?.wraps = true
         chu.frame = NSRect(x: 84, y: 52, width: 260, height: 40)
         [anh, tieuDe, chu].forEach { nen.addSubview($0) }
-        for (i, (ten, mau)) in [("Từ chối", NSColor.systemRed), ("Chấp nhận", NSColor.systemGreen)].enumerated() {
+        // Safe handoff: WKWebView's synthesized element.click() from this
+        // floating panel correlates with duplicated call history entries.
+        // Require the actual in-page Messenger dialog to receive the final
+        // accept/decline gesture. Labels deliberately say "Mở để ...".
+        for (i, (ten, mau)) in [("Mở để từ chối", NSColor.systemRed), ("Mở để nhận", NSColor.systemGreen)].enumerated() {
             // Nút tô màu đỏ / xanh như hộp của Messenger (bezelColor không ăn trên nền HUD → tự tô bằng layer)
             let b = NutBamNgay(title: ten, target: self, action: #selector(bamNut(_:)))
             b.isBordered = false; b.wantsLayer = true
@@ -1757,12 +1763,19 @@ extension AppDelegate {
         }
     }
     func bamGoiDen(_ nhan: String) {
-        callRinger.stop(reason: "floating call action: " + nhan)
-        webView.evaluateJavaScript("window.__vmBamGoiDen && window.__vmBamGoiDen('\(nhan)')") { kq, _ in
-            NSLog("VM: BẢNG gọi đến → %@", "\(kq ?? "")")
-        }
-        goiDen = nil; capNhatBangGoi()
-        if nhan == "Chấp nhận" { NSApp.activate() }   // anh bắt máy → đưa app lên để cửa sổ gọi hiện trước mặt
+        // IMPORTANT: Never simulate Accept / Decline by calling DOM
+        // element.click(). The real Messenger dialog provides a proper
+        // user gesture and behaves correctly in dual-client Safari tests.
+        // This floating panel is now a navigation affordance only.
+        floatingCallHandoffs += 1
+        NSLog("MN CALL: floating panel opened original Messenger call dialog (%d)", floatingCallHandoffs)
+        bangGoi?.orderOut(nil)
+        goiDen = nil
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        // Deliberately keep native ringtone running until the genuine
+        // in-page accept/decline closes the dialog or the call ends.
     }
 }
 
