@@ -2201,14 +2201,14 @@ extension AppDelegate {
     @objc func moGioiThieu() { moCaiDat(); (cuaSoCaiDat?.contentView?.viewWithTag(77) as? NSSegmentedControl).map { $0.selectedSegment = 3; chonTab($0) } }
     @objc func moCaiDat() {
         if let w = cuaSoCaiDat { w.makeKeyAndOrderFront(nil); NSApp.activate(); return }
-        let tab = NSSegmentedControl(labels: ["Thông báo", "Cuộc gọi", "Tải file", "Chung"], trackingMode: .selectOne,
+        let tab = NSSegmentedControl(labels: ["Thông báo", "Cuộc gọi", "Tải file", "Chung"].map(MenuLocalization.ui), trackingMode: .selectOne,
                                      target: self, action: #selector(chonTab(_:)))
         for (i, h) in ["bell", "phone", "arrow.down.circle", "gearshape"].enumerated() {
             tab.setImage(NSImage(systemSymbolName: h, accessibilityDescription: nil), forSegment: i)
         }
         tab.segmentStyle = .automatic; tab.selectedSegment = 0; tab.tag = 77
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 400), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "Cài đặt \(tenApp)"; w.isReleasedWhenClosed = false
+        w.title = MenuLocalization.uiFormat("Cài đặt %@", tenApp); w.isReleasedWhenClosed = false
         let goc = NSView(); tab.translatesAutoresizingMaskIntoConstraints = false; goc.addSubview(tab)
         NSLayoutConstraint.activate([tab.topAnchor.constraint(equalTo: goc.topAnchor, constant: 14),
                                      tab.centerXAnchor.constraint(equalTo: goc.centerXAnchor),
@@ -2247,13 +2247,13 @@ extension AppDelegate {
 
     // ——— Khối giao diện dùng chung ———
     func chuGhi(_ s: String) -> NSTextField {
-        let t = NSTextField(wrappingLabelWithString: s); t.font = .systemFont(ofSize: 11.5); t.textColor = .secondaryLabelColor
+        let t = NSTextField(wrappingLabelWithString: MenuLocalization.ui(s)); t.font = .systemFont(ofSize: 11.5); t.textColor = .secondaryLabelColor
         t.preferredMaxLayoutWidth = 500; return t
     }
     func tieuDeMuc(_ s: String, _ hinh: String) -> NSView {
         let a = NSImageView(image: NSImage(systemSymbolName: hinh, accessibilityDescription: nil) ?? NSImage())
         a.contentTintColor = .secondaryLabelColor
-        let t = NSTextField(labelWithString: s); t.font = .systemFont(ofSize: 14, weight: .semibold)
+        let t = NSTextField(labelWithString: MenuLocalization.ui(s)); t.font = .systemFont(ofSize: 14, weight: .semibold)
         let h = NSStackView(views: [a, t]); h.spacing = 6
         return h
     }
@@ -2265,22 +2265,24 @@ extension AppDelegate {
     }
     func congTac(_ khoa: String, _ macDinh: Bool, _ tieuDe: String, doi: ((Bool) -> Void)? = nil) -> NSView {
         let sw = NSSwitch(); sw.state = caiDat(khoa, macDinh) ? .on : .off; sw.controlSize = .small
-        sw.setAccessibilityLabel(tieuDe)
+        let localTitle = MenuLocalization.ui(tieuDe)
+        sw.setAccessibilityLabel(localTitle)
         let hd = HanhDong { [weak self] s in
             let bat = (s as! NSSwitch).state == .on
             UserDefaults.standard.set(bat, forKey: khoa); NSLog("VM: Cài đặt %@ = %@", khoa, bat ? "bật" : "tắt")
             doi?(bat); _ = self
         }
         giuHanhDong.append(hd); sw.target = hd; sw.action = #selector(HanhDong.chay(_:))
-        return dong(NSTextField(labelWithString: tieuDe), sw)
+        return dong(NSTextField(labelWithString: localTitle), sw)
     }
     func nut(_ tieuDe: String, _ hinh: String? = nil, xanh: Bool = false, lien: Bool = false, _ lam: @escaping () -> Void) -> NSButton {
         let hd = HanhDong { _ in lam() }; giuHanhDong.append(hd)
-        let b = NSButton(title: tieuDe, target: hd, action: #selector(HanhDong.chay(_:)))
+        let localTitle = MenuLocalization.ui(tieuDe)
+        let b = NSButton(title: localTitle, target: hd, action: #selector(HanhDong.chay(_:)))
         if let hinh { b.image = NSImage(systemSymbolName: hinh, accessibilityDescription: nil); b.imagePosition = .imageLeading }
         if xanh { b.bezelColor = .controlAccentColor; b.keyEquivalent = "" }
         if lien { b.isBordered = false; b.contentTintColor = .linkColor
-            b.attributedTitle = NSAttributedString(string: tieuDe, attributes: [.foregroundColor: NSColor.linkColor, .font: NSFont.systemFont(ofSize: 13)]) }
+            b.attributedTitle = NSAttributedString(string: localTitle, attributes: [.foregroundColor: NSColor.linkColor, .font: NSFont.systemFont(ofSize: 13)]) }
         return b
     }
     // Thẻ bo góc chứa các dòng, có vạch ngăn
@@ -2308,15 +2310,15 @@ extension AppDelegate {
     func trangThongBao() -> NSView {
         trangDoc([
             tieuDeMuc("Tin nhắn", "message"),
-            the([congTac("baoTinNhan", true, "Báo tin nhắn mới khi không mở app") { [weak self] _ in self?.guiCaiDatChoTrang() },
-                 chuGhi("App tự xem danh sách chat 2 giây/lần khi anh ở app khác (Messenger trên Safari không tự gửi thông báo tin nhắn). Không lưu nội dung."),
+            the([congTac("baoTinNhan", true, "Thông báo tin nhắn khi ứng dụng chạy nền") { [weak self] _ in self?.guiCaiDatChoTrang() },
+                 chuGhi("Theo dõi thay đổi danh sách chat khi Messenger Native vẫn đang chạy nhưng không được sử dụng. Quan sát sự kiện và quét dự phòng mỗi 3,5 giây. Không hoạt động sau khi thoát app hoặc khi WebKit bị đình chỉ. Nội dung xem trước được xử lý tạm thời và có thể được macOS lưu trong Notification Center."),
                  congTac("boTinGoi", true, "Bỏ thông báo tin về cuộc gọi khi bảng gọi đang hiện") { [weak self] _ in self?.guiCaiDatChoTrang() },
                  chuGhi("Tránh thông báo «đã bắt đầu / đã kết thúc cuộc gọi» trùng với bảng gọi. Vẫn giữ thông báo «cuộc gọi nhỡ».")]),
             tieuDeMuc("Cuộc gọi đến", "phone.arrow.down.left"),
             the([congTac("bangGoiNoi", true, "Hiện bảng nổi góc màn hình") { [weak self] _ in self?.capNhatBangGoi() },
                  congTac("dockNayGoi", true, "Icon trên Dock nảy khi có cuộc gọi"),
                  chuGhi("Tin nhắn thì Dock không nảy, chỉ hiện thông báo.")]),
-            dong(chuGhi("Muốn thông báo hiện cả nội dung: Cài đặt hệ thống → Thông báo → \(tenApp) → Hiện bản xem trước → Luôn luôn."),
+            dong(chuGhi(MenuLocalization.uiFormat("Muốn thông báo hiện cả nội dung: Cài đặt hệ thống → Thông báo → %@ → Hiện bản xem trước → Luôn luôn.", tenApp)),
                  nut("Mở cài đặt Thông báo") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!) }),
         ])
@@ -2329,7 +2331,7 @@ extension AppDelegate {
 
     func dongQuyenThietBi(_ title: String, media: AVMediaType) -> NSView {
         let state = CallMediaPermissions.status(for: media)
-        let detail = chuGhi(title + ": " + CallMediaPermissions.label(for: media))
+        let detail = chuGhi(MenuLocalization.ui(title) + ": " + CallMediaPermissions.label(for: media))
         if state == .notDetermined {
             return dong(detail, nut("Cho phép") { [weak self] in
                 CallMediaPermissions.request(media) {
@@ -2355,7 +2357,7 @@ extension AppDelegate {
         ])
     }
     func trangTaiFile() -> NSView {
-        let chon = NSPopUpButton(); chon.addItems(withTitles: ["Hỏi mỗi lần", "Luôn lưu vào thư mục bên dưới"])
+        let chon = NSPopUpButton(); chon.addItems(withTitles: ["Hỏi mỗi lần", "Luôn lưu vào thư mục bên dưới"].map(MenuLocalization.ui))
         chon.selectItem(at: UserDefaults.standard.string(forKey: "noiLuu") == "thang" ? 1 : 0)
         let hd = HanhDong { s in
             let thang = (s as! NSPopUpButton).indexOfSelectedItem == 1
@@ -2367,7 +2369,7 @@ extension AppDelegate {
         let ten = NSTextField(labelWithString: FileManager.default.displayName(atPath: hienTai.path)); ten.textColor = .secondaryLabelColor
         let chonThuMuc = nut("Chọn…") { [weak self] in
             let h = NSOpenPanel(); h.canChooseDirectories = true; h.canChooseFiles = false; h.canCreateDirectories = true
-            h.directoryURL = UserDefaults.standard.url(forKey: "thuMucLuu") ?? tai; h.prompt = "Chọn"
+            h.directoryURL = UserDefaults.standard.url(forKey: "thuMucLuu") ?? tai; h.prompt = MenuLocalization.ui("Chọn")
             guard let w = self?.cuaSoCaiDat else { return }
             h.beginSheetModal(for: w) { kq in
                 guard kq == .OK, let u = h.url else { return }
@@ -2378,15 +2380,15 @@ extension AppDelegate {
         let phai = NSStackView(views: [ten, chonThuMuc]); phai.spacing = 8
         return trangDoc([
             tieuDeMuc("Khi bấm Tải xuống", "arrow.down.circle"),
-            the([dong(NSTextField(labelWithString: "Nơi lưu"), chon),
-                 dong(NSTextField(labelWithString: "Thư mục (mở sẵn / lưu thẳng)"), phai),
+            the([dong(NSTextField(labelWithString: MenuLocalization.ui("Nơi lưu")), chon),
+                 dong(NSTextField(labelWithString: MenuLocalization.ui("Thư mục (mở sẵn / lưu thẳng)")), phai),
                  chuGhi("Ảnh tải bằng nút Tải xuống giữ độ phân giải gốc Messenger đang lưu.")]),
         ])
     }
     func trangChung() -> NSView {
         // Mở cùng macOS (Login Items)
         let sw = NSSwitch(); sw.controlSize = .small; sw.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        sw.setAccessibilityLabel("Mở \(tenApp) khi đăng nhập máy")
+        sw.setAccessibilityLabel(MenuLocalization.uiFormat("Mở %@ khi đăng nhập máy", tenApp))
         let hd = HanhDong { s in
             let sw = s as! NSSwitch
             do { if sw.state == .on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
@@ -2396,7 +2398,7 @@ extension AppDelegate {
         giuHanhDong.append(hd); sw.target = hd; sw.action = #selector(HanhDong.chay(_:))
         // Hiện bảng phím tắt = ngược của "khongHienPhimTat"
         let sw2 = NSSwitch(); sw2.controlSize = .small; sw2.state = UserDefaults.standard.bool(forKey: "khongHienPhimTat") ? .off : .on
-        sw2.setAccessibilityLabel("Hiện bảng phím tắt khi mở app")
+        sw2.setAccessibilityLabel(MenuLocalization.ui("Hiện bảng phím tắt khi mở app"))
         let hd2 = HanhDong { [weak self] s in
             let hien = (s as! NSSwitch).state == .on
             UserDefaults.standard.set(!hien, forKey: "khongHienPhimTat"); self?.oKhongHien?.state = hien ? .off : .on
@@ -2408,14 +2410,14 @@ extension AppDelegate {
         icon.widthAnchor.constraint(equalToConstant: 64).isActive = true; icon.heightAnchor.constraint(equalToConstant: 64).isActive = true
         let ten = NSTextField(labelWithString: tenApp); ten.font = .systemFont(ofSize: 20, weight: .semibold)
         let ban = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let pb = NSTextField(labelWithString: "Phiên bản \(ban) · \(ngayPhatHanh)"); pb.textColor = .secondaryLabelColor
+        let pb = NSTextField(labelWithString: MenuLocalization.uiFormat("Phiên bản %@ · %@", ban, ngayPhatHanh)); pb.textColor = .secondaryLabelColor
         let bq = NSTextField(labelWithString: "© 2026 by Vduck"); bq.font = .systemFont(ofSize: 11.5); bq.textColor = .secondaryLabelColor
         let chu = NSStackView(views: [ten, pb, bq]); chu.orientation = .vertical; chu.alignment = .leading; chu.spacing = 2
         let gt = NSStackView(views: [icon, chu]); gt.spacing = 14; gt.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         let lien = NSStackView(views: [
             nut("Phím tắt", lien: true) { [weak self] in self?.moBangPhim() },
             nut("Có gì mới", lien: true) { [weak self] in
-                let a = NSAlert(); a.messageText = "Có gì mới"; a.informativeText = coGiMoi; a.addButton(withTitle: "Đóng")
+                let a = NSAlert(); a.messageText = MenuLocalization.ui("Có gì mới"); a.informativeText = coGiMoi; a.addButton(withTitle: MenuLocalization.ui("Đóng"))
                 if let w = self?.cuaSoCaiDat { a.beginSheetModal(for: w) } },
             nut("Thư mục nhật ký", lien: true) { NSWorkspace.shared.activateFileViewerSelecting([fileNhatKy]) },
         ]); lien.spacing = 16
@@ -2438,8 +2440,8 @@ extension AppDelegate {
                     try? FileManager.default.removeItem(at: u); try? FileManager.default.copyItem(at: fileNhatKy, to: u)
                     NSLog("VM: đã lưu nhật ký → %@", u.lastPathComponent) } },
             nut("Xoá", "trash") { [weak self] in
-                let a = NSAlert(); a.messageText = "Xoá nhật ký?"; a.informativeText = "Xoá nội dung file nhật ký trên máy. Không ảnh hưởng tin nhắn."
-                a.addButton(withTitle: "Xoá"); a.addButton(withTitle: "Hủy")
+                let a = NSAlert(); a.messageText = MenuLocalization.ui("Xoá nhật ký?"); a.informativeText = MenuLocalization.ui("Xoá nội dung file nhật ký trên máy. Không ảnh hưởng tin nhắn.")
+                a.addButton(withTitle: MenuLocalization.ui("Xoá")); a.addButton(withTitle: MenuLocalization.ui("Hủy"))
                 guard let w = self?.cuaSoCaiDat else { return }
                 a.beginSheetModal(for: w) { kq in
                     guard kq == .alertFirstButtonReturn else { return }
@@ -2447,8 +2449,8 @@ extension AppDelegate {
         ]); cacNut.spacing = 8
         return trangDoc([
             tieuDeMuc("Khởi động", "power"),
-            the([dong(NSTextField(labelWithString: "Mở \(tenApp) khi đăng nhập máy"), sw),
-                 dong(NSTextField(labelWithString: "Hiện bảng phím tắt khi mở app"), sw2),
+            the([dong(NSTextField(labelWithString: MenuLocalization.uiFormat("Mở %@ khi đăng nhập máy", tenApp)), sw),
+                 dong(NSTextField(labelWithString: MenuLocalization.ui("Hiện bảng phím tắt khi mở app")), sw2),
                  chuGhi("Xem lại bảng phím tắt bất cứ lúc nào: ⌘/.")]),
             tieuDeMuc("Giới thiệu", "info.circle"),
             the([gt, lien]),
@@ -2457,7 +2459,7 @@ extension AppDelegate {
                  chuGhi("Dùng máy chung, hoặc trước khi đưa máy cho người khác: xoá đăng nhập và dữ liệu Messenger lưu trên máy này. Tin nhắn trên tài khoản không bị xoá.")]),
             tieuDeMuc("Cập nhật", "arrow.triangle.2.circlepath"),
             the([dong(nut("Kiểm tra cập nhật", "arrow.clockwise", xanh: true) { [weak self] in self?.kiemTraCapNhat(imLang: false) }, oTT),
-                 chuGhi("App không tự hỏi – bấm nút để xem có bản mới trên GitHub (\(khoGitHub)). Bản mới được kiểm chữ ký số trước khi cài; app tự thay bản cũ và mở lại. Đăng nhập, cài đặt giữ nguyên.")]),
+                 chuGhi(MenuLocalization.uiFormat("App không tự hỏi – bấm nút để xem có bản mới trên GitHub (%@). Bản mới được kiểm chữ ký số trước khi cài; app tự thay bản cũ và mở lại. Đăng nhập, cài đặt giữ nguyên.", khoGitHub))]),
             tieuDeMuc("Chẩn đoán", "stethoscope"),
             the([congTac("ghiGoLoi", false, "Ghi nhật ký gỡ lỗi"),
                  chuGhi("Tắt: chỉ ghi lỗi và số đo. Bật: ghi chi tiết (dò tin, cuộc gọi) để tìm lỗi – không ghi nội dung tin nhắn hay tên người."),
