@@ -35,6 +35,23 @@ BetterTouchTool matches menu labels, so `Cửa sổ` does not match
 - No changes to Messenger DOM, call handling, notification, Reel playback,
   or WebKit throttling.
 
+## Native language behavior (expanded in PR #6)
+
+- **App menu bar** (App, Edit, View, Chats, Window, Help), nested items, zoom-animation options, and numbered-chat shortcuts resolve through `Menu.strings` in `en.lproj` and `vi.lproj`.
+- **All four Settings tabs** now resolve their main headings, option labels, buttons, accessibility labels, permissions status, helper text, and download preferences through `Interface.strings`. The Keyboard Shortcuts help window is also translated.
+- **Background message notification** wording corrected: the DOM engine uses `MutationObserver` and a **3.5-second recovery scan**, not an unconditional two-second timer. It requires Messenger Native to remain running, and it does **not** offer background push after Quit. Previews may be stored by macOS Notification Center.
+- **macOS decides the language** using the app bundle's preferred localizations, including an app-specific language choice in System Settings → General → Language & Region → Applications (when supported). English and Vietnamese are shipped; an unsupported preferred language falls back to English.
+- There is **no separate in-app language selector**. Changing the system/per-app language typically requires fully quitting and relaunching Messenger Native to rebuild native menus and Settings windows.
+- The Messenger website's own language and content are governed by Meta, independent of the macOS-native UI.
+- A few advanced update/diagnostic status messages still originate from the older, Vietnamese source; they do not affect the localized main menu or the primary Settings controls. Do not claim full-app localization of every diagnostic and release note.
+
+### Acceptance for language changes
+
+1. With macOS app language **English**, relaunch the app: menu reads **Edit · View · Chats · Window · Help**. Settings shows **Notifications · Calls · Downloads · General**; Stage Manager/BTT uses `Window;Remove Window from Set`.
+2. With macOS app language **Vietnamese**, relaunch: menu reads **Sửa · Xem · Đoạn chat · Cửa sổ · Trợ giúp**; Settings shows **Thông báo · Cuộc gọi · Tải file · Chung**. BTT must be configured with the actual localized OS menu command shown.
+3. When the app language is **French, Japanese, or another unsupported language**, app-owned strings should use English fallback. The OS-provided Stage Manager command can be localized independently by macOS, so copy its live title for the BTT preset rather than assuming an English item title.
+4. Return to your normal language, relaunch, and verify previous notification/call/Reel behavior and your existing BTT trigger.
+
 ## Install
 
 Use a separately signed, stable local app build:
