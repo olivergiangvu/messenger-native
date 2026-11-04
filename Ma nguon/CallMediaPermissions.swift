@@ -12,11 +12,11 @@ enum CallMediaPermissions {
 
     static func label(for media: AVMediaType) -> String {
         switch status(for: media) {
-        case .authorized: return "Đã cho phép"
-        case .notDetermined: return "Chưa yêu cầu"
-        case .denied: return "Đã từ chối"
-        case .restricted: return "Bị hạn chế"
-        @unknown default: return "Không xác định"
+        case .authorized: return MenuLocalization.ui("Đã cho phép")
+        case .notDetermined: return MenuLocalization.ui("Chưa yêu cầu")
+        case .denied: return MenuLocalization.ui("Đã từ chối")
+        case .restricted: return MenuLocalization.ui("Bị hạn chế")
+        @unknown default: return MenuLocalization.ui("Không xác định")
         }
     }
 
