@@ -1,0 +1,4 @@
+/* macOS native permission prompts, English UI */
+"CFBundleDisplayName" = "Messenger Native";
+"NSCameraUsageDescription" = "Allow camera access for Messenger video calls."; 
+"NSMicrophoneUsageDescription" = "Allow microphone access for Messenger voice and video calls.";
