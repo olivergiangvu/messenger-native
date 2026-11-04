@@ -14,6 +14,8 @@ final class NativeNotificationCoordinator {
     private(set) var submitted = 0
     private(set) var suppressed = 0
     private(set) var errors = 0
+    private(set) var cleanedUnreadLabels = 0
+    private(set) var lastSource = "none"
     private(set) var lastSubmissionError = "none"
 
     // Never keep WKWebView instances in this coordinator. Navigation is
@@ -37,9 +39,19 @@ final class NativeNotificationCoordinator {
 
         received += 1
         let source = (payload["nguon"] as? String) ?? "web"
-        let title = String((payload["tieuDe"] as? String ?? "Messenger").prefix(150))
-        let subtitle = String((payload["phuDe"] as? String ?? "").prefix(100))
-        let body = String((payload["noiDung"] as? String ?? "Tin nhắn mới").prefix(1000))
+        let prepared = NotificationPreviewFormatter.format(
+            title: payload["tieuDe"] as? String ?? "Messenger",
+            subtitle: payload["phuDe"] as? String ?? "",
+            body: payload["noiDung"] as? String ?? "Tin nhắn mới"
+        )
+        let title = String(prepared.title.prefix(150))
+        let subtitle = String(prepared.subtitle.prefix(100))
+        let body = String(prepared.body.prefix(1000))
+        lastSource = source
+        if prepared.removedUnreadLabel {
+            cleanedUnreadLabels += 1
+            NSLog("MN NOTI: unread-status UI label removed (source: %@)", source)
+        }
         let rawThread = payload["duongDan"] as? String ?? payload["tag"] as? String ?? ""
         let path = conversationPath(rawThread)
 
@@ -98,6 +110,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Errors: \(errors)\nLast submission error: \(lastSubmissionError)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
     }
 }
