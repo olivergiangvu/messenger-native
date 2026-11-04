@@ -243,7 +243,9 @@ let jsThongBao = """
   };
   let hopCu = '', kieuGoi = 'thoai', hopMatLuc = 0, lanNhipGoi = 0;
   let phienGoi = '', soPhienGoi = 0;
-  setInterval(() => tinhTon('hộp gọi', () => {
+  let soLanQuetGoi = 0, soQuetTuObserver = 0, ganObserverGoi = false, henQuetGoi = false;
+  const quetHopGoi = () => tinhTon('hộp gọi', () => {
+    soLanQuetGoi++;
     const nut = nutGoiDen('Chấp nhận') || nutGoiDen('Accept');
     const hop = nut ? nut.closest('[role="dialog"], [role="alertdialog"]') : null;
     if (hop) {
@@ -291,7 +293,61 @@ let jsThongBao = """
         guiSwift({ goiDenAn: true });
       }
     }
-  }), 700);
+  });
+
+  // React inserts/modifies call dialogs via DOM mutations. Reacting only to
+  // 700ms interval ticks can delay the custom incoming-call panel. Observe
+  // relevant dialog mutations and run a debounced fast scan (~70ms); retain
+  // the old 700ms poll as a conservative recovery path.
+  const lapQuetGoiNhanh = () => {
+    if (henQuetGoi) return;
+    henQuetGoi = true;
+    setTimeout(() => {
+      henQuetGoi = false;
+      soQuetTuObserver++;
+      quetHopGoi();
+    }, 70);
+  };
+  let observerCuocGoi = null;
+  function batQuanSatCuocGoi() {
+    if (observerCuocGoi || !document.body) return;
+    observerCuocGoi = new MutationObserver(changes => {
+      const coCuocGoi = !!hopCu;
+      for (const change of changes) {
+        if (coCuocGoi) { lapQuetGoiNhanh(); return; }
+        const target = change.target;
+        if (target instanceof Element &&
+            target.closest('[role="dialog"], [role="alertdialog"]')) {
+          lapQuetGoiNhanh(); return;
+        }
+        for (const node of change.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches('[role="dialog"], [role="alertdialog"]') ||
+              node.querySelector('[role="dialog"], [role="alertdialog"]')) {
+            lapQuetGoiNhanh(); return;
+          }
+        }
+      }
+    });
+    observerCuocGoi.observe(document.body, { childList: true, subtree: true });
+    ganObserverGoi = true;
+    lapQuetGoiNhanh();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batQuanSatCuocGoi, { once: true });
+  } else {
+    batQuanSatCuocGoi();
+  }
+  setInterval(() => {
+    if (!observerCuocGoi) batQuanSatCuocGoi();
+    quetHopGoi();
+  }, 700);
+  window.__mnCallDetectionStatus = () => ({
+    version: '1.0', observerAttached: ganObserverGoi,
+    scans: soLanQuetGoi, observerScans: soQuetTuObserver,
+    incomingDialogActive: !!hopCu
+  });
+
   window.__vmBamGoiDen = (nhan) => {
     const e = nutGoiDen(nhan) || nutGoiDen(nhan === 'Chấp nhận' ? 'Accept' : 'Decline');
     if (!e) return 'không thấy nút ' + nhan;
