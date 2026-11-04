@@ -1444,11 +1444,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // Cửa sổ → Hiệu ứng phóng to: 3 lựa chọn, dấu ✓ ở cái đang dùng
     func menuHieuUng() -> NSMenuItem {
-        let goc = NSMenuItem(title: "Hiệu ứng phóng to", action: nil, keyEquivalent: "")
-        let m = NSMenu(title: "Hiệu ứng phóng to")
+        let goc = NSMenuItem(title: MenuLocalization.text("Hiệu ứng phóng to"), action: nil, keyEquivalent: "")
+        let m = NSMenu(title: MenuLocalization.text("Hiệu ứng phóng to"))
         let dangDung = UserDefaults.standard.string(forKey: "hieuUngPhongTo") ?? hieuUngMacDinh
         for k in kieuHieuUng {
-            let i = NSMenuItem(title: k.ten, action: #selector(chonHieuUng(_:)), keyEquivalent: "")
+            let i = NSMenuItem(title: MenuLocalization.text(k.ten), action: #selector(chonHieuUng(_:)), keyEquivalent: "")
             i.target = self
             i.representedObject = k.ma
             i.state = k.ma == dangDung ? .on : .off
@@ -1584,13 +1584,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
+    @objc func chanDoanMenuCuaSo() {
+        let menu = NSApp.windowsMenu
+        let actualTitle = menu?.title ?? "(missing)"
+        let visibleItems = menu?.items.map { $0.title }.filter { !$0.isEmpty }.joined(separator: "\n• ") ?? "(missing)"
+        let expectedPath = actualTitle == "Window"
+            ? "Window;Remove Window from Set"
+            : actualTitle + ";(use the Stage Manager item title shown on this Mac)"
+        let alert = NSAlert()
+        alert.messageText = MenuLocalization.text("Window Menu Diagnostics…")
+        alert.informativeText = """
+        macOS language selected by app: \(Bundle.main.preferredLocalizations.first ?? "?")
+        Window menu: \(actualTitle)
+        BTT menu path: \(expectedPath)
+        Main window visible: \(window.isVisible)
+        Main window collection behavior: \(window.collectionBehavior.rawValue)
+
+        Current Window menu items:
+        • \(visibleItems)
+
+        macOS may insert Stage Manager items dynamically when the Window
+        menu is opened; absence in this snapshot is not conclusive.
+        BetterTouchTool needs Accessibility access and the correct app target.
+        Bundle ID: \(Bundle.main.bundleIdentifier ?? "?")
+        """
+        alert.addButton(withTitle: MenuLocalization.text("Đóng"))
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
     func taoMenu() {
         let menuChinh = NSMenu()
 
         @discardableResult
         func them(_ tieuDe: String, _ items: [NSMenuItem]) -> NSMenu {
-            let goc = NSMenuItem()
-            let m = NSMenu(title: tieuDe)
+            let localizedTitle = MenuLocalization.text(tieuDe)
+            let goc = NSMenuItem(title: localizedTitle, action: nil, keyEquivalent: "")
+            let m = NSMenu(title: localizedTitle)
             items.forEach { m.addItem($0) }
             goc.submenu = m
             menuChinh.addItem(goc)
@@ -1598,7 +1628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         func muc(_ ten: String, _ sel: Selector?, _ phim: String, _ dich: AnyObject? = nil,
                  _ phimPhu: NSEvent.ModifierFlags = .command) -> NSMenuItem {
-            let i = NSMenuItem(title: ten, action: sel, keyEquivalent: phim)
+            let i = NSMenuItem(title: MenuLocalization.text(ten), action: sel, keyEquivalent: phim)
             i.target = dich
             i.keyEquivalentModifierMask = phimPhu
             return i
@@ -1647,10 +1677,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             .separator(),
             muc("Call Diagnostics…", #selector(chanDoanCuocGoi), "", self),
             muc("Stop Ringing Now", #selector(dungChuongGoiNgay), "", self),
+            .separator(),
+            muc("Window Menu Diagnostics…", #selector(chanDoanMenuCuaSo), "", self),
         ])
         them("Đoạn chat", [muc("Tin nhắn mới", #selector(tinNhanMoi), "n", self), .separator()]
             + (1...9).map { n in
-                let i = muc("Đoạn chat \(n)", #selector(moDoanChat(_:)), "\(n)", self)
+                let i = muc(MenuLocalization.numberedChat(n), #selector(moDoanChat(_:)), "\(n)", self)
                 i.tag = n - 1
                 return i
             })
