@@ -8,6 +8,7 @@ on:
       - feature/notification-nowplaying
       - feature/call-ringtone-lifecycle
       - feature/call-permissions-latency
+      - feature/stage-manager-localization
   workflow_dispatch:
 
 concurrency:
@@ -24,10 +25,13 @@ jobs:
         run: |
           swiftc "Ma nguon/LinkRouting.swift" "Tests/LinkRoutingTests.swift" -o /tmp/mn-routing-tests
           /tmp/mn-routing-tests
+          swiftc "Ma nguon/NotificationDeepLink.swift" "Tests/NotificationDeepLinkTests.swift" -o /tmp/mn-notification-deeplink-tests
+          /tmp/mn-notification-deeplink-tests
       - name: WebView JavaScript regression
         run: |
           node Tests/ReelPreviewTests.cjs
           node Tests/NotificationEngineTests.cjs
+          node Tests/NotificationNavigationTests.cjs
           node Tests/IncomingCallAudioTests.cjs
           node Tests/MenuLocalizationTests.cjs
           node Tests/InterfaceLocalizationTests.cjs
@@ -48,6 +52,7 @@ jobs:
         run: |
           bash build.sh "$RUNNER_TEMP/messenger-native-ci"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-engine.js"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-navigation.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/reel-preview.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/incoming-call-audio.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/en.lproj/Menu.strings"
