@@ -12,6 +12,7 @@
 import Cocoa
 import WebKit
 import UserNotifications
+import AVFoundation
 import ServiceManagement
 import CryptoKit
 
@@ -242,7 +243,9 @@ let jsThongBao = """
   };
   let hopCu = '', kieuGoi = 'thoai', hopMatLuc = 0, lanNhipGoi = 0;
   let phienGoi = '', soPhienGoi = 0;
-  setInterval(() => tinhTon('hộp gọi', () => {
+  let soLanQuetGoi = 0, soQuetTuObserver = 0, ganObserverGoi = false, henQuetGoi = false;
+  const quetHopGoi = () => tinhTon('hộp gọi', () => {
+    soLanQuetGoi++;
     const nut = nutGoiDen('Chấp nhận') || nutGoiDen('Accept');
     const hop = nut ? nut.closest('[role="dialog"], [role="alertdialog"]') : null;
     if (hop) {
@@ -290,7 +293,61 @@ let jsThongBao = """
         guiSwift({ goiDenAn: true });
       }
     }
-  }), 700);
+  });
+
+  // React inserts/modifies call dialogs via DOM mutations. Reacting only to
+  // 700ms interval ticks can delay the custom incoming-call panel. Observe
+  // relevant dialog mutations and run a debounced fast scan (~70ms); retain
+  // the old 700ms poll as a conservative recovery path.
+  const lapQuetGoiNhanh = () => {
+    if (henQuetGoi) return;
+    henQuetGoi = true;
+    setTimeout(() => {
+      henQuetGoi = false;
+      soQuetTuObserver++;
+      quetHopGoi();
+    }, 70);
+  };
+  let observerCuocGoi = null;
+  function batQuanSatCuocGoi() {
+    if (observerCuocGoi || !document.body) return;
+    observerCuocGoi = new MutationObserver(changes => {
+      const coCuocGoi = !!hopCu;
+      for (const change of changes) {
+        if (coCuocGoi) { lapQuetGoiNhanh(); return; }
+        const target = change.target;
+        if (target instanceof Element &&
+            target.closest('[role="dialog"], [role="alertdialog"]')) {
+          lapQuetGoiNhanh(); return;
+        }
+        for (const node of change.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches('[role="dialog"], [role="alertdialog"]') ||
+              node.querySelector('[role="dialog"], [role="alertdialog"]')) {
+            lapQuetGoiNhanh(); return;
+          }
+        }
+      }
+    });
+    observerCuocGoi.observe(document.body, { childList: true, subtree: true });
+    ganObserverGoi = true;
+    lapQuetGoiNhanh();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batQuanSatCuocGoi, { once: true });
+  } else {
+    batQuanSatCuocGoi();
+  }
+  setInterval(() => {
+    if (!observerCuocGoi) batQuanSatCuocGoi();
+    quetHopGoi();
+  }, 700);
+  window.__mnCallDetectionStatus = () => ({
+    version: '1.0', observerAttached: ganObserverGoi,
+    scans: soLanQuetGoi, observerScans: soQuetTuObserver,
+    incomingDialogActive: !!hopCu
+  });
+
   window.__vmBamGoiDen = (nhan) => {
     const e = nutGoiDen(nhan) || nutGoiDen(nhan === 'Chấp nhận' ? 'Accept' : 'Decline');
     if (!e) return 'không thấy nút ' + nhan;
@@ -1489,7 +1546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     @objc func chanDoanCuocGoi() {
-        let script = "JSON.stringify(window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false})"
+        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}})"
         webView.evaluateJavaScript(script) { value, error in
             let dialog = NSAlert()
             dialog.messageText = "Call Diagnostics"
@@ -2232,8 +2289,34 @@ extension AppDelegate {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!) }),
         ])
     }
+    func lamMoiTrangQuyenGoi() {
+        guard let tab = cuaSoCaiDat?.contentView?.viewWithTag(77) as? NSSegmentedControl,
+              tab.selectedSegment == 1 else { return }
+        chonTab(tab)
+    }
+
+    func dongQuyenThietBi(_ title: String, media: AVMediaType) -> NSView {
+        let state = CallMediaPermissions.status(for: media)
+        let detail = chuGhi(title + ": " + CallMediaPermissions.label(for: media))
+        if state == .notDetermined {
+            return dong(detail, nut("Cho phép") { [weak self] in
+                CallMediaPermissions.request(media) {
+                    self?.lamMoiTrangQuyenGoi()
+                }
+            })
+        }
+        return dong(detail, nut(state == .authorized ? "Xem quyền" : "Mở Cài đặt macOS") {
+            CallMediaPermissions.openPrivacySettings(for: media)
+        })
+    }
+
     func trangCuocGoi() -> NSView {
         trangDoc([
+            tieuDeMuc("Quyền thiết bị — cấp trước cuộc gọi đầu tiên", "lock.shield"),
+            the([dongQuyenThietBi("Microphone", media: .audio),
+                 dongQuyenThietBi("Camera", media: .video),
+                 chuGhi("Chọn Cho phép để macOS hỏi quyền ngay, không cần đợi cuộc gọi đầu tiên. Thao tác này không tự bật micro, camera hoặc ghi âm. Khi bị từ chối, mở Cài đặt hệ thống để thay đổi."),
+                 chuGhi("Quyền của macOS và quyền truy cập của trang Messenger bên trong WebKit là hai bước riêng; trang web vẫn chỉ được phép dùng thiết bị khi bắt đầu cuộc gọi.")]),
             tieuDeMuc("Thu nhỏ cuộc gọi (PiP)", "pip"),
             the([congTac("tuPiP", true, "Tự thu nhỏ cuộc gọi khi chuyển app / bấm sang cửa sổ chat"),
                  chuGhi("Cửa sổ gọi thu nhỏ 360×240, nổi trên mọi app, kể cả khi chia sẻ màn hình. Nút xanh hoặc ⇧⌘P để phóng to lại.")]),
