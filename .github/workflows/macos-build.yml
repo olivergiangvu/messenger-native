@@ -11,6 +11,7 @@ on:
       - feature/stage-manager-localization
       - feature/notification-deeplink
       - feature/notification-clean-preview
+      - feature/notification-preview-native-filter
   workflow_dispatch:
 
 concurrency:
@@ -35,6 +36,7 @@ jobs:
         run: |
           node Tests/ReelPreviewTests.cjs
           node Tests/NotificationEngineTests.cjs
+          node Tests/NotificationEmojiTests.cjs
           node Tests/NotificationNavigationTests.cjs
           node Tests/IncomingCallAudioTests.cjs
           node Tests/MenuLocalizationTests.cjs
