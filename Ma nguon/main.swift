@@ -1546,7 +1546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     @objc func chanDoanCuocGoi() {
-        let script = "JSON.stringify(window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false})"
+        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}})"
         webView.evaluateJavaScript(script) { value, error in
             let dialog = NSAlert()
             dialog.messageText = "Call Diagnostics"
