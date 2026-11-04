@@ -348,12 +348,8 @@ let jsThongBao = """
     incomingDialogActive: !!hopCu
   });
 
-  window.__vmBamGoiDen = (nhan) => {
-    const e = nutGoiDen(nhan) || nutGoiDen(nhan === 'Chấp nhận' ? 'Accept' : 'Decline');
-    if (!e) return 'không thấy nút ' + nhan;
-    guiSwift({ chuongGoiDung: true });
-    e.click(); return 'đã bấm ' + nhan;
-  };
+  // The original Messenger dialog is the only place where the user can
+  // accept/decline a call. Do not expose a synthetic click bridge here.
 
   // Nhật ký cuộc gọi (chỉ ghi BƯỚC: xin camera/micro/màn hình được hay lỗi, tắt thiết bị, trang ẩn/hiện –
   // không ghi nội dung, hình, tiếng). Xem bằng cách mở app qua `open --stdout`.
