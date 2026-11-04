@@ -882,7 +882,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSLog("VM: TẢI lỗi %@ – %@", ten, loi.localizedDescription)
         // Anh bấm Hủy ở hộp lưu → WebKit báo "cancelled" → im lặng (anh dặn 03/11: Hủy thì thoát, không hiện bảng)
         if (loi as NSError).code == NSURLErrorCancelled || ten == "?" { return }
-        let a = NSAlert(); a.messageText = "Không tải được \(ten)"; a.informativeText = loi.localizedDescription
+        let a = NSAlert(); a.messageText = MenuLocalization.uiFormat("Không tải được %@", ten); a.informativeText = loi.localizedDescription
         if let w = NSApp.keyWindow ?? window { a.beginSheetModal(for: w) } else { a.runModal() }
     }
 
@@ -1820,7 +1820,7 @@ extension AppDelegate {
         let luoi = NSGridView()
         luoi.rowSpacing = 6; luoi.columnSpacing = 18
         for (i, nhom) in dsPhimTat.enumerated() {
-            let tieuDe = NSTextField(labelWithString: nhom.nhom)
+            let tieuDe = NSTextField(labelWithString: MenuLocalization.ui(nhom.nhom))
             tieuDe.font = .boldSystemFont(ofSize: 13)
             let hang = luoi.addRow(with: [tieuDe, NSGridCell.emptyContentView])
             hang.topPadding = i == 0 ? 0 : 10
@@ -1829,7 +1829,7 @@ extension AppDelegate {
                 let phim = NSTextField(labelWithString: p.phim)
                 phim.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
                 phim.textColor = .secondaryLabelColor
-                luoi.addRow(with: [phim, NSTextField(labelWithString: p.viec)])
+                luoi.addRow(with: [phim, NSTextField(labelWithString: MenuLocalization.ui(p.viec))])
             }
         }
         luoi.column(at: 0).xPlacement = .trailing
@@ -1838,7 +1838,7 @@ extension AppDelegate {
             luoi.cell(for: v)?.xPlacement = .leading
         }
         luoi.translatesAutoresizingMaskIntoConstraints = false
-        let o = NSButton(checkboxWithTitle: "Không hiện bảng này khi mở app (xem lại: ⌘/)", target: self, action: #selector(doiHienPhimTat(_:)))
+        let o = NSButton(checkboxWithTitle: MenuLocalization.ui("Không hiện bảng này khi mở app (xem lại: ⌘/)"), target: self, action: #selector(doiHienPhimTat(_:)))
         o.state = UserDefaults.standard.bool(forKey: "khongHienPhimTat") ? .on : .off
         o.translatesAutoresizingMaskIntoConstraints = false
         oKhongHien = o
@@ -1854,7 +1854,7 @@ extension AppDelegate {
             o.bottomAnchor.constraint(equalTo: nen.bottomAnchor, constant: -18),
         ])
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "Phím tắt – \(tenApp)"
+        w.title = MenuLocalization.uiFormat("Phím tắt – %@", tenApp)
         w.isReleasedWhenClosed = false
         w.contentView = nen
         w.setContentSize(nen.fittingSize)
@@ -2514,9 +2514,9 @@ extension AppDelegate {
     // rồi tải lại messenger.com → trang đăng nhập. Không đụng cài đặt của app.
     func hoiDangXuat() {
         let a = NSAlert(); a.alertStyle = .critical
-        a.messageText = "Đăng xuất và xoá dữ liệu Messenger?"
-        a.informativeText = "Xoá đăng nhập, cookie và dữ liệu Messenger lưu trên máy này. Tin nhắn trên tài khoản không bị xoá. Lần sau phải đăng nhập lại."
-        a.addButton(withTitle: "Đăng xuất và xoá"); a.addButton(withTitle: "Hủy")
+        a.messageText = MenuLocalization.ui("Đăng xuất và xoá dữ liệu Messenger?")
+        a.informativeText = MenuLocalization.ui("Xoá đăng nhập, cookie và dữ liệu Messenger lưu trên máy này. Tin nhắn trên tài khoản không bị xoá. Lần sau phải đăng nhập lại.")
+        a.addButton(withTitle: MenuLocalization.ui("Đăng xuất và xoá")); a.addButton(withTitle: MenuLocalization.ui("Hủy"))
         a.buttons.first?.hasDestructiveAction = true
         guard let w = cuaSoCaiDat else { return }
         a.beginSheetModal(for: w) { [weak self] kq in if kq == .alertFirstButtonReturn { self?.dangXuatVaXoa() } }
