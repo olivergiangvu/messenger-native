@@ -6,7 +6,7 @@ struct NotificationDeepLinkTests {
         let expected = "https://www.messenger.com/t/123456789"
         assert(NotificationDeepLink.url(forPath: "/t/123456789")?.absoluteString == expected)
         assert(NotificationDeepLink.url(forPath: "/t/group.abc")?.path == "/t/group.abc")
-        assert(NotificationDeepLink.url(forPath: "/t/123456789/")?.path == "/t/123456789/")
+        assert(NotificationDeepLink.url(forPath: "/t/123456789/")?.absoluteString == "https://www.messenger.com/t/123456789/")
 
         // Reject navigation targets that did not originate from a Messenger
         // conversation. Never create an external or script URL from a banner.
