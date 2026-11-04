@@ -6,6 +6,7 @@ on:
       - develop
       - feature/link-routing-reels
       - feature/notification-nowplaying
+      - feature/call-ringtone-lifecycle
   workflow_dispatch:
 
 concurrency:
