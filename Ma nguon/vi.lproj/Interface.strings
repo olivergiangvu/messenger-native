@@ -75,3 +75,35 @@
 "Đã xoá đăng nhập và dữ liệu Messenger trên máy này." = "Đã xoá đăng nhập và dữ liệu Messenger trên máy này.";
 "Không tải được %@" = "Không tải được %@";
 "Bảng phím tắt" = "Bảng phím tắt";
+
+/* Shortcut guide, app-owned diagnostics and contextual labels. */
+"Đoạn chat" = "Đoạn chat";
+"Tin nhắn mới" = "Tin nhắn mới";
+"Mở đoạn chat thứ 1–9" = "Mở đoạn chat thứ 1–9";
+"Tìm kiếm" = "Tìm kiếm";
+"Tìm (người, nhóm, tin nhắn)" = "Tìm (người, nhóm, tin nhắn)";
+"Tìm thẳng trong tab Tin nhắn" = "Tìm thẳng trong tab Tin nhắn";
+"Xoá chữ, thoát ô tìm" = "Xoá chữ, thoát ô tìm";
+"Thu nhỏ / phóng to cuộc gọi (PiP)" = "Thu nhỏ / phóng to cuộc gọi (PiP)";
+"Nút xanh" = "Nút xanh";
+"Đang PiP → về cỡ thường" = "Đang PiP → về cỡ thường";
+"Cửa sổ" = "Cửa sổ";
+"Ẩn / hiện thông tin cuộc trò chuyện" = "Ẩn / hiện thông tin cuộc trò chuyện";
+"Ẩn / hiện thanh bên" = "Ẩn / hiện thanh bên";
+"Chia nửa màn hình" = "Chia nửa màn hình";
+"Toàn màn hình" = "Toàn màn hình";
+"Thu nhỏ xuống Dock" = "Thu nhỏ xuống Dock";
+"Đóng cửa sổ (app vẫn chạy)" = "Đóng cửa sổ (app vẫn chạy)";
+"Xem" = "Xem";
+"Tải lại / tải lại hoàn toàn" = "Tải lại / tải lại hoàn toàn";
+"Phóng to / thu nhỏ / cỡ thường" = "Phóng to / thu nhỏ / cỡ thường";
+"App" = "App";
+"Mở bảng này" = "Mở bảng này";
+"Ẩn app / ẩn app khác" = "Ẩn app / ẩn app khác";
+"Thoát" = "Thoát";
+"Không thể đọc script: %@" = "Không thể đọc script: %@";
+"Không nhận được trạng thái." = "Không nhận được trạng thái.";
+"Cấp quyền thông báo đã được cho phép" = "Cấp quyền thông báo đã được cho phép";
+"Chưa thể cấp quyền thông báo" = "Chưa thể cấp quyền thông báo";
+"Đã cấp quyền thông báo" = "Đã cấp quyền thông báo";
+"Tắt chuông ngay" = "Tắt chuông ngay";
