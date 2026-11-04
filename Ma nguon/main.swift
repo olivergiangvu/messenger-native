@@ -708,6 +708,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return decisionHandler(.allow)             // khung con (iframe) → để trang tự lo
         }
         let target = linkThat(url) ?? url
+        // An about:blank popup can navigate to groupcall only AFTER it was
+        // created. Register its session path here to catch a second popup that
+        // would otherwise create another WebRTC call for the same URL.
+        if webView !== self.webView, target.path.contains("/groupcall/"),
+           let callWindow = webView.window, callWindow !== window {
+            if let existing = callWindowsByPath[target.path],
+               existing !== callWindow, cuaSoPhu.contains(where: { $0 === existing }) {
+                duplicateCallPopupsBlocked += 1
+                NSLog("MN CALL: duplicate popup navigation blocked (count=%d)", duplicateCallPopupsBlocked)
+                DispatchQueue.main.async { callWindow.close() }
+                return decisionHandler(.cancel)
+            }
+            callWindowsByPath[target.path] = callWindow
+            callRinger.stop(reason: "call window navigating to groupcall")
+        }
         // Also recover about:blank popups that later navigate to a Reel.
         // Navigation inside the actual embedded video iframe is unaffected.
         if action.sourceFrame.isMainFrame, LinkRouting.isReel(target) {
@@ -1209,7 +1224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // second WebRTC session. Never return an existing WKWebView here:
         // WebKit requires a newly created view with the supplied configuration.
         let callPath = target.path.contains("/groupcall/") ? target.path : nil
-        if let callPath, let existing = callWindowsByPath[callPath], existing.isVisible {
+        if let callPath, let existing = callWindowsByPath[callPath],
+           cuaSoPhu.contains(where: { $0 === existing }) {
             duplicateCallPopupsBlocked += 1
             existing.makeKeyAndOrderFront(nil)
             NSLog("MN CALL: duplicate popup blocked (count=%d)", duplicateCallPopupsBlocked)
