@@ -37,7 +37,7 @@
   // message content, and makes macOS banners unnecessarily verbose.
   // Only remove a standalone status line that is NOT the final preview line:
   // if somebody literally sends "Unread message", keep that message intact.
-  const unreadStatusLine = /^(?:(?:\\d+\\s+)?unread\\s+messages?|(?:\\d+\\s+)?tin\\s+nhắn\\s+chưa\\s+đọc)$/i;
+  const unreadStatusLine = /^(?:(?:\d+\s+)?unread\s+messages?|(?:\d+\s+)?tin\s+nhắn\s+chưa\s+đọc)$/i;
   function cleanPreviewLines(parts) {
     return parts.filter((part, index) =>
       !(unreadStatusLine.test(part) && index < parts.length - 1));
@@ -45,7 +45,7 @@
 
   function textLines(element) {
     const raw = (element.innerText || element.textContent || '');
-    const parts = raw.split(/\\n/).map(normalize).filter((part) => part && !metadata(part));
+    const parts = raw.split(/\n/).map(normalize).filter((part) => part && !metadata(part));
     return cleanPreviewLines(parts);
   }
 
