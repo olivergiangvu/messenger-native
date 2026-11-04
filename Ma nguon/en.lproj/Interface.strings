@@ -75,3 +75,35 @@
 "Đã xoá đăng nhập và dữ liệu Messenger trên máy này." = "Messenger login and local data have been removed from this Mac.";
 "Không tải được %@" = "Could Not Download %@";
 "Bảng phím tắt" = "Keyboard Shortcuts";
+
+/* Shortcut guide, app-owned diagnostics and contextual labels. */
+"Đoạn chat" = "Chats";
+"Tin nhắn mới" = "New Message";
+"Mở đoạn chat thứ 1–9" = "Open Conversation 1–9";
+"Tìm kiếm" = "Search";
+"Tìm (người, nhóm, tin nhắn)" = "Find People, Groups or Messages";
+"Tìm thẳng trong tab Tin nhắn" = "Search Directly in Messages Tab";
+"Xoá chữ, thoát ô tìm" = "Clear Search / Leave Search Field";
+"Thu nhỏ / phóng to cuộc gọi (PiP)" = "Toggle Call Picture-in-Picture";
+"Nút xanh" = "Green Button";
+"Đang PiP → về cỡ thường" = "Restore from Picture-in-Picture";
+"Cửa sổ" = "Window";
+"Ẩn / hiện thông tin cuộc trò chuyện" = "Toggle Conversation Details";
+"Ẩn / hiện thanh bên" = "Toggle Sidebar";
+"Chia nửa màn hình" = "Tile Windows Side by Side";
+"Toàn màn hình" = "Full Screen";
+"Thu nhỏ xuống Dock" = "Minimize to Dock";
+"Đóng cửa sổ (app vẫn chạy)" = "Close Window (App Keeps Running)";
+"Xem" = "View";
+"Tải lại / tải lại hoàn toàn" = "Reload / Reload from Origin";
+"Phóng to / thu nhỏ / cỡ thường" = "Zoom In / Out / Actual Size";
+"App" = "Application";
+"Mở bảng này" = "Show This Guide";
+"Ẩn app / ẩn app khác" = "Hide App / Hide Others";
+"Thoát" = "Quit";
+"Không thể đọc script: %@" = "Could Not Read Script: %@";
+"Không nhận được trạng thái." = "No Status Returned.";
+"Cấp quyền thông báo đã được cho phép" = "Notification Permission Granted";
+"Chưa thể cấp quyền thông báo" = "Unable to Obtain Notification Permission";
+"Đã cấp quyền thông báo" = "Notification Permission Granted";
+"Tắt chuông ngay" = "Stop Ringing Now";
