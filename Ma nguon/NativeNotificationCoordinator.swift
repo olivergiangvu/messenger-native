@@ -5,11 +5,18 @@ import UserNotifications
 /// Owned by AppDelegate. Receives messages from the webpage but leaves
 /// presentation/sound to macOS UserNotifications (rather than web audio).
 final class NativeNotificationCoordinator {
-    private struct Previous {
-        let timestamp: Date
-        let source: String
+    private var deduplicator = NotificationDeduplicator()
+    private(set) var sameSourceDuplicates = 0
+    private(set) var crossSourceDuplicates = 0
+    private(set) var focusReplays = 0
+
+    func didResignActive() {
+        deduplicator.didResignActive()
     }
-    private var recentlySent: [String: Previous] = [:]
+
+    func didBecomeActive() {
+        deduplicator.didBecomeActive()
+    }
     private(set) var received = 0
     private(set) var submitted = 0
     private(set) var suppressed = 0
@@ -55,21 +62,34 @@ final class NativeNotificationCoordinator {
         let rawThread = payload["duongDan"] as? String ?? payload["tag"] as? String ?? ""
         let path = conversationPath(rawThread)
 
-        // Suppress duplicates when Messenger's native Notification API and
-        // DOM fallback independently report the same preview in quick succession.
-        // Do NOT collapse repeated messages coming from the same source.
-        let key = (path ?? rawThread) + "\u{001f}" + title + "\u{001f}" + body
-        let now = Date()
-        recentlySent = recentlySent.filter { now.timeIntervalSince($0.value.timestamp) < 30 }
-        if let prior = recentlySent[key],
-           prior.source != source,
-           now.timeIntervalSince(prior.timestamp) < 8 {
-            suppressed += 1
-            NSLog("MN NOTI: cross-source duplicate suppressed")
-            return
+        // De-duplicate at the shared Swift boundary, not only in one JS
+        // source: same-source replays and cross-source web/DOM overlap.
+        // A background notification may be replayed when WKWebView regains
+        // focus many minutes later; remember only the previous background
+        // session and suppress its exact content during the focus transition.
+        // Test notifications intentionally bypass dedup.
+        if source != "test" {
+            let key = (path ?? rawThread) + "\u{001f}" + title + "\u{001f}" + body
+            switch deduplicator.evaluate(key: key, source: source) {
+            case .deliver:
+                break
+            case .duplicateSameSource:
+                suppressed += 1
+                sameSourceDuplicates += 1
+                NSLog("MN NOTI: immediate same-source repeat suppressed")
+                return
+            case .duplicateCrossSource:
+                suppressed += 1
+                crossSourceDuplicates += 1
+                NSLog("MN NOTI: cross-source duplicate suppressed")
+                return
+            case .duplicateOnFocus:
+                suppressed += 1
+                focusReplays += 1
+                NSLog("MN NOTI: old background notification replayed on focus; suppressed")
+                return
+            }
         }
-        recentlySent[key] = Previous(timestamp: now, source: source)
-        if recentlySent.count > 250 { recentlySent.removeAll(keepingCapacity: true) }
 
         let content = UNMutableNotificationContent()
         content.title = title
@@ -110,6 +130,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
     }
 }
