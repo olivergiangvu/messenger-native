@@ -1,5 +1,5 @@
 #!/bin/bash
-# Archive the EXACT currently installed, working Messenger Native app and
+# Archive the EXACT currently installed Messenger Native app and
 # optionally upload it as a GitHub pre-release. NEVER rebuild or re-sign here.
 # Default is DRAFT to protect possible personal Apple Development signer info.
 # To make it a published GitHub pre-release: --publish
@@ -7,7 +7,7 @@ set -euo pipefail
 
 REPO="olivergiangvu/messenger-native"
 TAG="rollback-2026-11-05-pre-webkit"
-# Source reference is a known good PR #17 HEAD, not a cryptographic claim
+# Source reference is a pre-memory PR #17 HEAD, not a cryptographic claim
 # that the locally installed binary was built from precisely this commit.
 SOURCE_SHA="cedd5a153a247d47cbbff1fe0a6ed9533f9f84f0"
 BUNDLE_ID="com.olivergiangvu.messengernative"
@@ -100,9 +100,9 @@ fi
 (cd "$DIR" && shasum -a 256 "$ZIPNAME" > "$ZIPNAME.sha256")
 DIGEST=$(shasum -a 256 "$ZIP" | awk '{print $1}')
 cat > "$NOTES" <<EOF
-## Messenger Native — working-install rollback snapshot
+## Messenger Native — pre-fix rollback snapshot (incoming-call issue known)
 
-This is a **manual rollback** archive of the working macOS application installed
+This is a **manual rollback** archive of the macOS application installed
 on 2026-11-05, taken **before** installing the WebKit memory diagnostics
 experiment (PR #18 / PR #19). The existing signed .app bundle was zipped as-is:
 **not rebuilt, not re-signed**.
@@ -115,7 +115,7 @@ experiment (PR #18 / PR #19). The existing signed .app bundle was zipped as-is:
 - **Source caveat:** the installed binary has no verified embedded Git SHA, so
   this source reference is a historical checkpoint, NOT proven binary provenance.
 
-### Manual rollback on the Mac
+### Known issue\nThe user reported an incoming call missing its expected alert on 2026-11-05\naround 18:51 local time. This archive is NOT a verified fully stable release;\nit only preserves the exact pre-experiment app for emergency rollback.\n\n### Manual rollback on the Mac
 Download the ZIP and companion .sha256 file from this release; verify the ZIP
 checksum, extract the app and install it through the repository's
 \`install-local.sh\` script. Or use \`scripts/restore-rollback.sh <zip-path>\`
@@ -161,12 +161,12 @@ echo "Target source commit reference: $SOURCE_SHA"
 if [ "$MODE" = "publish" ]; then
   echo "Mode: PUBLIC PRE-RELEASE (Apple signing identity may be visible)"
   gh release create "$TAG" "$ZIP" "$SUM" -R "$REPO" \
-    --target "$SOURCE_SHA" --title "Messenger Native — rollback snapshot 2026-11-05" \
+    --target "$SOURCE_SHA" --title "Messenger Native — pre-fix backup 2026-11-05 (call alerts unverified)" \
     --notes-file "$NOTES" --prerelease --latest=false
 else
   echo "Mode: DRAFT PRE-RELEASE (owner/collaborators only)"
   gh release create "$TAG" "$ZIP" "$SUM" -R "$REPO" \
-    --target "$SOURCE_SHA" --title "Messenger Native — rollback snapshot 2026-11-05" \
+    --target "$SOURCE_SHA" --title "Messenger Native — pre-fix backup 2026-11-05 (call alerts unverified)" \
     --notes-file "$NOTES" --prerelease --draft --latest=false
 fi
 echo "GitHub release: https://github.com/$REPO/releases/tag/$TAG"
