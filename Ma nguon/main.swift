@@ -434,6 +434,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let nativeNotifications = NativeNotificationCoordinator()
     var suppressedWebChimes = 0
     let callRinger = IncomingCallRinger()
+    // Fallback alert if a known incoming-call ringtone was intercepted but
+    // Messenger did not expose the expected accept/decline dialog.
+    private var pendingCallFallback: DispatchWorkItem?
+    private var lastFallbackCallAlertAt: Date?
+    private(set) var callFallbackCandidates = 0
+    private(set) var callFallbackNotifications = 0
+    private(set) var callFallbackDismissedByDialog = 0
     var callWindowsByPath: [String: NSWindow] = [:]
     var duplicateCallPopupsBlocked = 0
     private var lastExternalReel: (url: String, at: Date)?
@@ -623,23 +630,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
         if d["amChuongGoiDen"] as? Bool == true, message.webView == webView {
+            let sessionsBefore = callRinger.sessionsStarted
             callRinger.soundCandidate()
+            // Only arm the fallback on a NEW ringtone session. The browser
+            // often repeats play() for a single call: do not spam banners.
+            if callRinger.sessionsStarted > sessionsBefore {
+                scheduleCallFallbackNotification()
+            }
             return
         }
         if d["chuongGoiDung"] as? Bool == true, message.webView == webView {
+            cancelCallFallbackNotification(dialogConfirmed: false)
             callRinger.stop(reason: "call accepted or declined")
             return
         }
         if let session = d["goiDangDo"] as? String, message.webView == webView {
+            cancelCallFallbackNotification(dialogConfirmed: true)
             callRinger.incomingDialogVisible(sessionID: session)
             return
         }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
+            cancelCallFallbackNotification(dialogConfirmed: true)
             callRinger.incomingDialogVisible(sessionID: g["phien"] as? String ?? "")
             if goiDen == nil, !NSApp.isActive, caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }   // chỉ cuộc gọi mới nảy Dock
             goiDen = (g["chu"] as? String ?? "Có người đang gọi cho bạn", g["anh"] as? String ?? "", g["video"] as? Bool ?? false, g["nhom"] as? Bool ?? false); capNhatBangGoi(); return
         }
         if d["goiDenAn"] != nil, message.webView == webView {
+            cancelCallFallbackNotification(dialogConfirmed: false)
             callRinger.stop(reason: "incoming call dialog closed")
             goiDen = nil; capNhatBangGoi(); return
         }
@@ -676,6 +693,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard d["id"] is String else { return }
         guard caiDat("baoTinNhan", true) else { return }
         nativeNotifications.deliver(d)
+    }
+
+    private func cancelCallFallbackNotification(dialogConfirmed: Bool) {
+        if pendingCallFallback != nil {
+            if dialogConfirmed { callFallbackDismissedByDialog += 1 }
+            pendingCallFallback?.cancel()
+            pendingCallFallback = nil
+        }
+    }
+
+    private func scheduleCallFallbackNotification() {
+        cancelCallFallbackNotification(dialogConfirmed: false)
+        callFallbackCandidates += 1
+        let task = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingCallFallback = nil
+            // The normal Messenger dialog + native call panel take precedence.
+            guard self.goiDen == nil, self.callRinger.isRinging else { return }
+            let now = Date()
+            // An incoming ring may replay after a WebKit media state change.
+            // Keep fallback cards to at most one per 60 seconds.
+            if let last = self.lastFallbackCallAlertAt, now.timeIntervalSince(last) < 60 { return }
+            self.lastFallbackCallAlertAt = now
+            let content = UNMutableNotificationContent()
+            content.title = "Cuộc gọi Messenger đến"
+            content.body = "Mở Messenger Native để xem và trả lời cuộc gọi."
+            content.userInfo = ["mnCallFallback": true]
+            // NativeCallRinger already plays a sound; avoid duplicate alerts.
+            let id = "mn-incoming-call-fallback-" + UUID().uuidString
+            let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error {
+                    NSLog("MN CALL: fallback notification failed: %@", error.localizedDescription)
+                }
+            }
+            self.callFallbackNotifications += 1
+            if !NSApp.isActive && self.caiDat("dockNayGoi", true) {
+                NSApp.requestUserAttention(.criticalRequest)
+            }
+            NSLog("MN CALL: known ringtone without detectable dialog; fallback notification queued")
+        }
+        pendingCallFallback = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: task)
     }
 
     // App đang mở ở trước vẫn hiện thông báo (giống Messenger chính chủ)
@@ -1588,6 +1648,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             \(self.callRinger.status)
             Active call windows: \(self.callWindowsByPath.count)
             Duplicate call popups blocked: \(self.duplicateCallPopupsBlocked)
+            Fallback ringtone sessions: \(self.callFallbackCandidates)
+            Fallback call notifications: \(self.callFallbackNotifications)
+            Fallback avoided when dialog detected: \(self.callFallbackDismissedByDialog)
+            Pending fallback: \(self.pendingCallFallback != nil)
+            Main Messenger window currently visible: \(self.window.isVisible)
+            App currently active: \(NSApp.isActive)
 
             Audio bridge: \((value as? String) ?? "Unavailable: \(error?.localizedDescription ?? "unknown")")
 
