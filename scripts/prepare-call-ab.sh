@@ -31,6 +31,11 @@ esac
 candidate="$1"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
+if [ "$candidate" = "pr20" ] &&
+   [ "$(git branch --show-current 2>/dev/null)" != "fix/incoming-call-alert-reliability" ]; then
+  echo "For pr20, check out fix/incoming-call-alert-reliability first." >&2
+  exit 1
+fi
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
   echo "Not a Git checkout." >&2; exit 1;
 }
