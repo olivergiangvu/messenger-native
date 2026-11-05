@@ -12,6 +12,8 @@ final class NativeNotificationCoordinator {
     private(set) var lastPreviewRepeats = 0
     private(set) var genericStatusSuppressed = 0
     private(set) var webSubmitted = 0
+    private(set) var webEventsWithoutThread = 0
+    private(set) var webSubmittedWithoutThread = 0
     private(set) var domSubmitted = 0
     private(set) var threadCardsReplaced = 0
     private var richPreviewByThread: [String: Date] = [:]
@@ -68,6 +70,12 @@ final class NativeNotificationCoordinator {
         }
         let rawThread = payload["duongDan"] as? String ?? payload["tag"] as? String ?? ""
         let path = conversationPath(rawThread)
+        if source == "web" && path == nil {
+            // This Web Notification event has no validated /t/<thread>.
+            // Do not invent a thread identity from a display name:
+            // different people or groups can share the same name.
+            webEventsWithoutThread += 1
+        }
         let genericStatus = NotificationDisplayPolicy.isGenericStatus(body)
 
         // Generic Web status such as "Unread message:" is not a message
@@ -168,7 +176,10 @@ final class NativeNotificationCoordinator {
                 } else {
                     self.submitted += 1
                     if source == "dom" { self.domSubmitted += 1 }
-                    if source == "web" { self.webSubmitted += 1 }
+                    if source == "web" {
+                        self.webSubmitted += 1
+                        if path == nil { self.webSubmittedWithoutThread += 1 }
+                    }
                     NSLog("MN NOTI: submitted source %@ to macOS (not proof of banner display)", source)
                 }
             }
@@ -186,6 +197,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Generic suppressed: \(genericStatusSuppressed) | Thread cards replaced: \(threadCardsReplaced) | DOM submitted: \(domSubmitted) | Web submitted: \(webSubmitted) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Generic suppressed: \(genericStatusSuppressed) | Thread cards replaced: \(threadCardsReplaced) | DOM submitted: \(domSubmitted) | Web submitted: \(webSubmitted) | Web no-thread received: \(webEventsWithoutThread) | Web no-thread submitted: \(webSubmittedWithoutThread) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
     }
 }
