@@ -39,6 +39,8 @@
   let dockBadgeUpdates = 0;
   let unknownRowsBaselined = 0;
   let staleCandidatesBlocked = 0;
+  let relativeTimeChangesBlocked = 0;
+  let inlineTimestampsRemoved = 0;
   const recentLocalText = new Map();
   const LOCAL_TEXT_TTL_MS = 12000;
   const MAX_LOCAL_TEXTS = 8;
@@ -224,6 +226,57 @@
     return cleanPreviewLines(parts);
   }
 
+
+  // Messenger renders the chat age (e.g. "6m") inside some conversation
+  // anchors, sometimes on the SAME visual/text line as the message preview.
+  // The age advances once a minute even without a new message.
+  // A standalone metadata() filter is insufficient for this layout.
+  const trailingAge = /^(.+?\S)\s+(\d{1,3}\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|[smhdwy])(?:\s*(?:trước|ago))?)$/i;
+  const ageUnits = {
+    s: 1 / 60, giây: 1 / 60,
+    m: 1, phút: 1,
+    h: 60, giờ: 60,
+    d: 1440, ngày: 1440,
+    w: 10080, tuần: 10080,
+    tháng: 43200,
+    y: 525600, năm: 525600
+  };
+  function splitTrailingAge(text) {
+    const match = normalize(text).match(trailingAge);
+    if (!match) return null;
+    const age = normalize(match[2]);
+    const units = age.match(/^(\d{1,3})\s*(giây|phút|giờ|ngày|tuần|tháng|năm|[smhdwy])/i);
+    if (!units) return null;
+    const factor = ageUnits[units[2].toLowerCase()];
+    if (!factor) return null;
+    return { content: normalize(match[1]), age, minutes: Number(units[1]) * factor };
+  }
+
+  // Only remove an age from a notification body if the DOM ALSO has a
+  // separate leaf element containing that same age. This protects genuine
+  // messages such as "See you in 5m" from having their content truncated.
+  function hasIsolatedAgeNode(anchor, age) {
+    if (typeof anchor.querySelectorAll !== 'function') return false;
+    const leaves = Array.from(anchor.querySelectorAll('time, abbr, span, [datetime]')).slice(-50);
+    return leaves.some(node =>
+      (!node.childElementCount || node.childElementCount === 0) &&
+      normalize(node.textContent || node.innerText) === age
+    );
+  }
+
+  // If the Web UI does not expose a separate timestamp leaf, suppress only
+  // the specific ageing transition of the SAME preview. Do not suppress a
+  // real changed body or a new conversation merely because it ends in "m".
+  function isAgeOnlyChange(previous, current) {
+    if (!previous || !current || previous.sender !== current.sender ||
+        previous.isDraft || current.isDraft) return false;
+    const oldAge = splitTrailingAge(previous.preview);
+    const newAge = splitTrailingAge(current.preview);
+    return !!oldAge && !!newAge &&
+      oldAge.content === newAge.content &&
+      newAge.minutes > oldAge.minutes;
+  }
+
   function unread(row) {
     if (row.getAttribute('aria-label') &&
         /\b(unread|chưa đọc)\b/i.test(row.getAttribute('aria-label'))) return true;
@@ -251,6 +304,11 @@
     const title = parts[0].slice(0, 110) || 'Messenger';
     let preview = normalize(parts.slice(1).join(' ')).slice(0, 500);
     if (!preview) preview = 'Tin nhắn mới';
+    const age = splitTrailingAge(preview);
+    if (age && hasIsolatedAgeNode(anchor, age.age)) {
+      preview = age.content;
+      inlineTimestampsRemoved += 1;
+    }
     const isDraft = isDraftPreview(preview);
 
     // A sender prefix is reliably extracted only when Messenger shows it.
@@ -375,7 +433,10 @@
       const old = conversations.get(item.path);
       // An unread badge changing by itself (e.g. "Mark as unread") is NOT
       // proof that a new message arrived. Only a changed preview is eligible.
-      const previewChanged = !!old && old.signature !== item.signature;
+      const clockOnly = !!old && old.signature !== item.signature &&
+        isAgeOnlyChange(old, item);
+      if (clockOnly) relativeTimeChangesBlocked += 1;
+      const previewChanged = !!old && old.signature !== item.signature && !clockOnly;
       // A row appearing at the top is NOT proof that a new message arrived:
       // Messenger may reorder, virtualize or restore old unread conversations.
       // Previously we treated every unseen top-six unread row as fresh,
@@ -474,6 +535,7 @@
     localSendSkipped,
     dockBadgeState, dockBadgeCount, dockRowsVisible, dockBadgeUpdates,
     unknownRowsBaselined, staleCandidatesBlocked,
+    relativeTimeChangesBlocked, inlineTimestampsRemoved,
     trackedConversations: conversations.size,
     observerAttached: !!observer, lastEvent
   });

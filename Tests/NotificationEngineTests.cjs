@@ -18,13 +18,18 @@ let currentPath = '/';
 const documentListeners = new Map();
 
 const observerRoot = {};
-const row = (href, title, preview, unread = true, group = false) => ({
+const row = (href, title, preview, unread = true, group = false, ageLeaf = '') => ({
   getAttribute(attr) {
     return attr === 'aria-label' ? unread ? '2 tin nhắn chưa đọc' : '' : null;
   },
   querySelector(selector) {
     if (selector !== 'a[href*="/t/"]') return null;
-    return { innerText: title + '\n' + preview, getAttribute: () => href };
+    return {
+      innerText: title + '\n' + preview,
+      getAttribute: () => href,
+      querySelectorAll: () => ageLeaf
+        ? [{ textContent: ageLeaf, childElementCount: 0 }] : []
+    };
   },
   querySelectorAll() { return Array(group ? 2 : 1).fill({}); },
   closest() { return observerRoot; },
@@ -424,5 +429,67 @@ assert.doesNotMatch(badgeSwift, /document\.querySelectorAll\('\[aria-label\^="Đ
 assert.match(badgeSwift, /d\["nguonBadge"\]/,
   'Native Dock badge must require source labeling from conversation rows');
 assert.match(badgeSwift, /Dock badge: /, 'Notification Diagnostics must show Dock badge source');
+
+
+// Regression from real 2026-11-05 capture: Messenger appends a live relative
+// timestamp to an OLD preview on the SAME line, e.g. TikTok URL + "1m".
+// Changing only "1m" => "2m" => ... must not produce a new alert each minute.
+const countBeforeAge = received().length;
+const tiktok = 'Đăng: https://vt.tiktok.com/ZSpYe68xL/';
+rows = [row('/t/bnn', '🏀 Bnn', tiktok + ' 1m', true, false, '1m')];
+mutationCallback();
+runTimers();
+assert.equal(received().length, countBeforeAge,
+  'An unseen old unread chat is baseline-only');
+for (const minute of [2, 3, 4, 5, 6]) {
+  rows = [row('/t/bnn', '🏀 Bnn', tiktok + ' ' + minute + 'm', true, false, minute + 'm')];
+  mutationCallback();
+  runTimers();
+}
+assert.equal(received().length, countBeforeAge,
+  'The old TikTok link must not generate one banner per elapsed minute');
+assert.ok(window.__mnNotificationStatus().inlineTimestampsRemoved >= 6,
+  'Inline timestamps from separate DOM leaf nodes must be stripped');
+
+// Different real incoming content remains eligible, but timestamp UI never
+// appears in the notification body.
+const secondLink = 'Đăng: https://vt.tiktok.com/AnotherLink/';
+rows = [row('/t/bnn', '🏀 Bnn', secondLink + ' 1m', true, false, '1m')];
+mutationCallback();
+runTimers();
+assert.equal(received().length, countBeforeAge + 1,
+  'Genuinely new message must still send exactly one banner');
+assert.equal(received().at(-1).noiDung, secondLink,
+  'Notification preview must not include a separate UI timestamp');
+
+// Fallback for Messenger layouts whose relative time shares a single DOM
+// text node (no independent age element): compare preceding signature
+// and suppress only monotonic age changes, not changed message content.
+rows = [row('/t/no-leaf', 'No leaf', 'Existing preview 1m', true)];
+mutationCallback();
+runTimers();
+const countBeforeFallback = received().length;
+for (const minute of [2, 3, 4, 5, 6]) {
+  rows = [row('/t/no-leaf', 'No leaf', 'Existing preview ' + minute + 'm', true)];
+  mutationCallback();
+  runTimers();
+}
+assert.equal(received().length, countBeforeFallback,
+  'No separate timestamp leaf: only the elapsed age changed, not the message');
+assert.ok(window.__mnNotificationStatus().relativeTimeChangesBlocked >= 5,
+  'Relative-age-only changes should appear in privacy-safe diagnostics');
+
+// Genuine text ending in "5m" with no timestamp leaf must be preserved.
+rows = [row('/t/no-leaf', 'No leaf', 'Meet me outside in 5m', true)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, countBeforeFallback + 1);
+assert.equal(received().at(-1).noiDung, 'Meet me outside in 5m',
+  'Do not automatically erase a genuine user-authored short time expression');
+rows = [row('/t/no-leaf', 'No leaf', 'Actually meet me in 10m', true)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, countBeforeFallback + 2,
+  'Different content, even with a time suffix, is a new preview');
 
 console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');
