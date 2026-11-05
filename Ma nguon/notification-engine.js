@@ -179,7 +179,8 @@
       index,
       signature: preview + '\u001f' + sender,
       selfAuthored: looksSelfAuthored(preview),
-      isDraft
+      isDraft,
+      draftContent: isDraft ? normalize(preview.replace(draftPrefix, '')) : ''
     };
   }
 
@@ -256,6 +257,12 @@
       // renders, even if the app is foregrounded or merely visible. Its
       // preview can still prove that the conversation changed.
       const activeIncoming = selected && previewChanged;
+      // When the user's typed draft becomes the same sent-message preview,
+      // the sidebar may omit the usual "You:" marker. Match exact local
+      // draft content, rather than suppressing arbitrary read messages.
+      const submittedLocalDraft = !!old && old.isDraft && !item.isDraft &&
+        selected && !item.unread && !!old.draftContent &&
+        normalize(item.preview) === old.draftContent;
       const eligible = previewChanged || freshTopUnread;
       if (eligible && (item.unread || activeIncoming)) {
         if (item.isDraft) {
@@ -263,6 +270,9 @@
           // composer; it does not represent an inbound server message.
           draftSkipped += 1;
           lastEvent = 'draft-change-suppressed';
+        } else if (submittedLocalDraft) {
+          draftSkipped += 1;
+          lastEvent = 'draft-send-suppressed';
         } else if (item.selfAuthored) {
           selfMessageSkipped += 1;
         } else {
