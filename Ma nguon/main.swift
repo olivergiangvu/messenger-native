@@ -212,8 +212,34 @@ let jsThongBao = """
   // Hộp "Cuộc gọi đến" của Messenger (dò 03/11: role=dialog, nút aria-label "Từ chối" / "Chấp nhận")
   // → gửi chữ "X đang gọi cho bạn" + ảnh đại diện cho Swift hiện BẢNG NỔI ở góc màn hình (anh chọn cách B, 03/11).
   // Không ghi tên vào nhật ký. Hộp biến mất (người kia gác / đã bấm) → báo Swift ẩn bảng.
-  const nutGoiDen = (nhan) => [...document.querySelectorAll('[role="dialog"] [aria-label], [role="alertdialog"] [aria-label]')]
-    .find(e => e.getAttribute('aria-label') === nhan);
+  // Meta can change button wording or render a call card without role=dialog.
+  // Broader labels are allowed ONLY for a real dialog, or a compact card that
+  // contains BOTH a decline control and explicit live incoming-call text.
+  // The extra check prevents ordinary chat "Accept" buttons from firing calls.
+  const nhanChapNhanGoi = /^(?:chấp nhận|accept|answer|trả lời)(?:\\s+(?:cuộc gọi|call|audio call|video call|voice call))?$/i;
+  const nhanTuChoiGoi = /^(?:từ chối|decline|ignore|bỏ qua)(?:\\s+(?:cuộc gọi|call|audio call|video call|voice call))?$/i;
+  const nhanNut = e => String(e.getAttribute('aria-label') || '').trim();
+  const noiDungDangGoi = /đang gọi|is calling|calling you|incoming (?:audio |video |voice )?call|đã mời bạn tham gia cuộc gọi|invited you to (?:join|a call)/i;
+  function hopGoiTuNut(e) {
+    const dialog = e.closest('[role="dialog"], [role="alertdialog"]');
+    if (dialog) return dialog;
+    let parent = e.parentElement;
+    for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
+      const text = String(parent.innerText || '').slice(0, 900);
+      if (!noiDungDangGoi.test(text)) continue;
+      if ([...parent.querySelectorAll('[aria-label]')].some(button => nhanTuChoiGoi.test(nhanNut(button)))) {
+        return parent;
+      }
+    }
+    return null;
+  }
+  const nutGoiDen = nhan => {
+    const re = nhan === 'Chấp nhận' || nhan === 'Accept' ? nhanChapNhanGoi
+      : nhan === 'Từ chối' || nhan === 'Decline' ? nhanTuChoiGoi : null;
+    if (!re) return null;
+    return [...document.querySelectorAll('button[aria-label], [role="button"][aria-label]')]
+      .find(e => re.test(nhanNut(e)) && !!hopGoiTuNut(e)) || null;
+  };
   // Tên nhóm của cuộc gọi nhóm: trong 6 dòng chat đầu, dòng có NHIỀU ảnh đại diện (ảnh nhóm = 2 ảnh chồng) hoặc tên có dấu phẩy
   // (nhóm chưa đặt tên → "Tên A, Tên B"), ưu tiên dòng có tên người gọi / tin về cuộc gọi. Không chắc → để trống.
   const tenNhomGoi = (nguoiGoi) => {
@@ -236,7 +262,7 @@ let jsThongBao = """
   const quetHopGoi = () => tinhTon('hộp gọi', () => {
     soLanQuetGoi++;
     const nut = nutGoiDen('Chấp nhận') || nutGoiDen('Accept');
-    const hop = nut ? nut.closest('[role="dialog"], [role="alertdialog"]') : null;
+    const hop = nut ? hopGoiTuNut(nut) : null;
     if (hop) {
       hopMatLuc = 0;
       const nay = Date.now();
