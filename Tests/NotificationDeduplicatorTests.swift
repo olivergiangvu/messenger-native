@@ -14,8 +14,8 @@ struct NotificationDeduplicatorTests {
         assert(immediate.evaluate(key: keyA, source: "dom", at: time(1)) == .duplicateSameSource)
         assert(immediate.evaluate(key: keyA, source: "web", at: time(3)) == .duplicateCrossSource)
         assert(immediate.evaluate(key: keyB, source: "dom", at: time(3)) == .deliver)
-        assert(immediate.evaluate(key: keyA, source: "dom", at: time(9)) == .deliver,
-               "Identical text later must not be permanently suppressed")
+        assert(immediate.evaluate(key: keyA, source: "dom", at: time(9)) == .duplicateLastPreview,
+               "A recently displayed identical last preview must not generate new banners")
 
         var focused = NotificationDeduplicator()
         focused.didResignActive(at: time(10))
@@ -45,7 +45,7 @@ struct NotificationDeduplicatorTests {
         var startup = NotificationDeduplicator()
         startup.didBecomeActive(at: time(0))
         assert(startup.evaluate(key: keyA, source: "dom", at: time(0)) == .deliver)
-        assert(startup.evaluate(key: keyA, source: "dom", at: time(4)) == .deliver)
+        assert(startup.evaluate(key: keyA, source: "dom", at: time(4)) == .duplicateLastPreview)
 
         // An unchanged duplicate delivered after background can still be
         // reported if it has a different conversation or actual message text.
@@ -56,6 +56,34 @@ struct NotificationDeduplicatorTests {
         assert(distinct.evaluate(key: "/t/bob\u{001f}Bob\u{001f}Hello 😊",
                                  source: "dom", at: time(601)) == .deliver)
 
-        print("Notification deduplicator tests passed: same/cross source, 21-minute background replay, focus epoch and new messages")
+        // Real field regression: one emoji in the chat was displayed as
+        // three separate notification banners several minutes apart, without
+        // a corresponding distinct new message in the conversation.
+        var repeatedEmoji = NotificationDeduplicator()
+        let emoji = "/t/alice\u{001f}Ba Ông Tam Đa\u{001f}Ma: 😂"
+        let newEmoji = "/t/alice\u{001f}Ba Ông Tam Đa\u{001f}Ma: 😁"
+        assert(repeatedEmoji.evaluate(key: emoji, source: "dom", at: time(0)) == .deliver)
+        assert(repeatedEmoji.evaluate(key: emoji, source: "dom", at: time(60)) == .duplicateLastPreview,
+               "Same last emoji re-rendered at +1min should not notify again")
+        assert(repeatedEmoji.evaluate(key: emoji, source: "web", at: time(180)) == .duplicateLastPreview,
+               "Same last emoji across sources at +3min should not notify again")
+        assert(repeatedEmoji.evaluate(key: emoji, source: "dom", at: time(300)) == .duplicateLastPreview,
+               "Same last emoji +5min should not notify again")
+        assert(repeatedEmoji.evaluate(key: newEmoji, source: "dom", at: time(301)) == .deliver,
+               "Different actual reply must notify immediately")
+        assert(repeatedEmoji.evaluate(key: emoji, source: "dom", at: time(302)) == .deliver,
+               "A distinct delivered message advances the chat; earlier text becomes eligible again")
+
+        // Different conversation, same body: no cross-chat suppression.
+        let otherThread = "/t/bob\u{001f}Bob\u{001f}Ma: 😂"
+        assert(repeatedEmoji.evaluate(key: otherThread, source: "dom", at: time(305)) == .deliver)
+
+        var expires = NotificationDeduplicator()
+        assert(expires.evaluate(key: emoji, source: "dom", at: time(0)) == .deliver)
+        assert(expires.evaluate(key: emoji, source: "dom", at: time(600)) == .duplicateLastPreview)
+        assert(expires.evaluate(key: emoji, source: "dom", at: time(601)) == .deliver,
+               "A real identical message much later must not be suppressed indefinitely")
+
+        print("Notification deduplicator tests passed: same/cross source, 21-minute focus replay, 1–5min emoji replay, distinct new messages and expiry")
     }
 }
