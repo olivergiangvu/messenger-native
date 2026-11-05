@@ -1,0 +1,146 @@
+# Background-to-focus duplicate notification regression
+
+## User report (2026-11-05)
+
+In a real macOS screenshot, Notification Center showed multiple notifications
+from one Messenger conversation. The user reports a duplicate of the **latest
+message** when bringing Messenger Native to foreground after the message was
+already notified in the background. One earlier copy was 21 minutes old.
+
+This is a distinct issue from the already-fixed false notifications for
+unsent drafts and user-sent messages.
+
+## Source-level finding
+
+The shared `NativeNotificationCoordinator` previously retained sent
+notification fingerprints for only 30 seconds and suppressed duplicates
+**only if `prior.source != source`**, and then only within 8 seconds.
+
+Consequently, the same DOM source could submit an identical message again
+when Messenger's conversation list refreshed on focus. The native coordinator
+would accept it as a new `UNNotificationRequest` with a fresh identifier.
+
+The screenshot cannot definitively prove both entries came from the same
+source, but this is a confirmed correctness gap in the existing code.
+
+## Follow-up field regression — 2026-11-05 at 10:50 (PR #12 update)
+
+The previous focus-only fix improved delivery, but the user observed
+three separate notifications from the same conversation containing the
+same last emoji preview `Ma: 😂`, about **one to five minutes** apart.
+The screenshot does not show three distinct incoming chat messages.
+
+**Why the old fix still leaked:** it only rejected same-source duplicates
+within 2 seconds, cross-source within 8 seconds, or the same background
+notification in the first 10 seconds following reactivation. Outside those
+windows the same last preview could be delivered repeatedly.
+
+**Additional safeguard:** keep the most recently DELIVERED preview for
+each conversation for at most **10 minutes**. If the same chat and same
+title/body reappear within that interval, do not submit a new native
+notification. A different real message in that chat advances the marker
+and is sent immediately; if the old body later appears after a different
+message, it remains eligible. Other conversations are independent.
+
+This is a conservative best-effort rule: if the sender intentionally sends
+the *same* emoji/text again within 10 minutes without any different preview
+in between, the app cannot reliably tell it apart from a UI replay without
+Meta's actual message IDs. Such a repeated real message may be suppressed.
+
+`View → Notification Diagnostics…` now exposes `Last-preview repeats`
+in addition to `Same-source`, `Cross-source` and `Focus replays`.
+Only counters are logged, never the preview content or contact names.
+
+## New native deduplication policy
+
+`NotificationDeduplicator.swift` is shared by both sources; the key remains
+the normalized trusted chat path, title and notification body:
+
+1. **Immediate same-source duplicate:** ignore identical payloads repeated
+   within **2 seconds**, even if DOM generated new random identifiers.
+2. **Immediate cross-source duplicate:** ignore equivalent Web/DOM payloads
+   within **8 seconds**.
+3. **Background-to-foreground replay:** when macOS reports
+   `didResignActive` and then `didBecomeActive`, ignore an identical
+   message *previously emitted during that exact background session* if it
+   reappears during the first **10 seconds after returning to focus**.
+   Keep a bounded in-memory record for up to **50 minutes**, which covers the
+   21-minute interval seen in the user's screenshot.
+4. **Genuine different content:** notification proceeds immediately in all
+   window states.
+5. Do **not** treat another past background session as the current session,
+   and never activate the resume rule on fresh application startup.
+6. Test/diagnostic notifications bypass dedup so the user can still
+   validate notification permission repeatedly.
+
+Retain at most 250 recent fingerprints. Never persist them or log messages;
+the in-memory keys naturally contain title/body already used in native
+notification delivery.
+
+## Diagnostic counters
+
+Under View → Notification Diagnostics…:
+
+- `Same-source`: repeated identical notifications stopped promptly
+- `Cross-source`: duplicate notifications from Web vs DOM
+- `Focus replays`: notifications already emitted in the latest background
+  session suppressed during foreground activation
+
+- `Last-preview repeats`: identical last chat preview redisplayed
+  minutes later and ignored
+
+The existing `Duplicates` metric sums all four categories.
+
+## Important limits
+
+Without Meta's genuine message ID, identical text sent twice in very quick
+succession can be mistaken for a duplicate inside the 2-second immediate
+window. A repeated identical message delivered at the exact moment of
+foreground activation may also be mistaken for a replay of the previous
+background notification. These are bounded trade-offs that cannot be
+eliminated with text-only DOM previews alone.
+
+The feature does **not** suppress all foreground notifications. Genuine
+different incoming content while app is focused continues to notify.
+
+## Real Mac acceptance
+
+1. Update `feature/notification-focus-dedup`, quit the old app fully, build
+   and install.
+2. Keep Messenger Native running in background and receive a fresh message.
+3. Confirm one notification; leave the app backgrounded for at least a few
+   minutes, then click into Messenger Native. The previous message should
+   **not** generate another notification on focus.
+4. Keep the app focused and have another account send a **different** new
+   message; it must notify normally.
+5. Switch to background again, receive another new message, then return to
+   focus. Confirm no replay.
+6. Verify own messages, `Draft:` changes and send-button input remain silent.
+7. Verify emoji in preview and click notification → open correct chat with no
+   full page reload.
+8. While the app remains running, leave the most recent chat preview
+   unchanged for several minutes. The same last message/emoji must not
+   generate additional banners simply because the sidebar redraws.
+9. If a duplicate remains, check `View → Notification Diagnostics…` for
+   `Same-source`, `Cross-source`, `Focus replays`,
+   `Last-preview repeats`, `Last source` and `Submitted`. A screenshot
+   with personal data hidden is sufficient.
+
+Existing delivered notifications in macOS Notification Center are not
+retroactively removed.
+
+## Install
+
+```bash
+cd ~/messenger-native
+git fetch origin
+git switch --track origin/feature/notification-focus-dedup
+bash build.sh
+bash install-local.sh
+```
+
+If the branch exists locally, use `git switch` and
+`git pull --ff-only origin feature/notification-focus-dedup` before building.
+
+Base is `feature/notification-all-window-states` (PR #11);
+keep this change separate from call lifecycle, BTT and other features.
