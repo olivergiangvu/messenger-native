@@ -1,0 +1,26 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const main = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'main.swift'), 'utf8');
+const begin = main.indexOf('  const laThongBaoGoiDen = ');
+const end = main.indexOf('  class ThongBao {', begin);
+assert.ok(begin >= 0 && end > begin, 'call classification helper exists');
+const script = [main.slice(begin, end), 'globalThis.classify = laThongBaoGoiDen;'].join('\n');
+const sandbox = {};
+vm.runInNewContext(script, sandbox);
+const isCall = sandbox.classify;
+assert.equal(isCall('Incoming audio call', 'Tap to answer'), true);
+assert.equal(isCall('Incoming video call from a friend', ''), true);
+assert.equal(isCall('Anna is calling you', ''), true);
+assert.equal(isCall('Messenger', 'Có cuộc gọi đến'), true);
+assert.equal(isCall('Missed call', 'Anna is calling you'), false);
+assert.equal(isCall('Messenger', 'You missed an audio call'), false);
+assert.equal(isCall('Cuộc gọi nhỡ', 'Anna đang gọi'), false);
+assert.equal(isCall('Messenger', 'New message from a friend'), false);
+assert.match(main, /guiSwift\(\{ mnWebIncomingCallHint: true \}\)/);
+assert.match(main, /if \(laThongBaoGoiDen\(this.title, this.body\)\)/);
+assert.match(main, /if d\["mnWebIncomingCallHint"\] as\? Bool == true/);
+console.log('Web incoming call hint regression: live calls recognized, missed/ended calls never become live ring alerts.');
