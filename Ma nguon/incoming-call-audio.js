@@ -16,6 +16,14 @@
   };
   let suppressed = 0;
   const playOriginal = HTMLMediaElement.prototype.play;
+  const ringtoneElements = new WeakMap();
+  let ringtoneElementSequence = 0;
+  function ringtoneToken(element) {
+    if (!ringtoneElements.has(element)) {
+      ringtoneElements.set(element, 'audio-' + (++ringtoneElementSequence));
+    }
+    return ringtoneElements.get(element);
+  }
 
   function isIncomingRingtone(element) {
     if (element.tagName !== 'AUDIO' || /\/groupcall(?:\/|$)/i.test(location.pathname)) {
@@ -31,7 +39,7 @@
   HTMLMediaElement.prototype.play = function (...args) {
     if (isIncomingRingtone(this)) {
       suppressed++;
-      send({ amChuongGoiDen: true });
+      send({ amChuongGoiDen: true, audioElementToken: ringtoneToken(this) });
       // Returning a fulfilled promise preserves play() contract without ever
       // registering this short chime as an active WebKit media session.
       return Promise.resolve();
