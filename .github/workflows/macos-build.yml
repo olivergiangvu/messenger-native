@@ -18,6 +18,7 @@ on:
       - feature/dock-unread-accuracy
       - feature/notification-event-freshness
       - feature/notification-center-history
+      - feature/reels-default-browser
   workflow_dispatch:
 
 concurrency:
