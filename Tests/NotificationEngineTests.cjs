@@ -476,7 +476,7 @@ for (const minute of [2, 3, 4, 5, 6]) {
 }
 assert.equal(received().length, countBeforeFallback,
   'No separate timestamp leaf: only the elapsed age changed, not the message');
-assert.equal(window.__mnNotificationStatus().relativeTimeChangesBlocked >= 5,
+assert.ok(window.__mnNotificationStatus().relativeTimeChangesBlocked >= 5,
   'Relative-age-only changes should appear in privacy-safe diagnostics');
 
 // Genuine text ending in "5m" with no timestamp leaf must be preserved.
