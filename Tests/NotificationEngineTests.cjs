@@ -353,4 +353,57 @@ const webChimeHandler = nativeApp.slice(
 assert.doesNotMatch(webChimeHandler, /NSSound\(/,
   'Native notification sounds must not be doubled by a manual focused-app chime');
 
+// Dock badge regression: a Chats navigation aria label that reports 2
+// unread MESSAGES is not proof of 2 unread CONVERSATIONS. Count only
+// actual rendered conversation rows, using the same unread detector as
+// the notification engine; do not retain a stale value when rows vanish.
+const navLabel = {
+  getAttribute(name) { return name === 'aria-label' ? 'Chats · 2 unread messages' : null; }
+};
+document.querySelectorAll = selector => {
+  if (selector === '[role="row"]') return rows;
+  if (selector.includes('aria-label')) return [navLabel];
+  return [];
+};
+const badgeEvents = () => messages.filter(item => item.nguonBadge);
+rows = [
+  row('/t/alice', 'Alice', 'Read chat preview', false),
+  row('/t/bob', 'Bob', 'Unread chat preview', true),
+  row('/t/bob', 'Bob', 'Same conversation duplicate DOM row', true)
+];
+mutationCallback();
+runTimers();
+assert.equal(badgeEvents().at(-1).nguonBadge, 'rendered-conversations');
+assert.equal(badgeEvents().at(-1).soChuaDoc, 1,
+  'Dock badge must count one unique unread conversation, not nav label 2 or two duplicated DOM rows');
+assert.equal(badgeEvents().at(-1).soDongHienThi, 3);
+assert.equal(window.__mnNotificationStatus().dockBadgeCount, 1);
+
+rows = [row('/t/alice', 'Alice', 'Read chat preview', false)];
+mutationCallback();
+runTimers();
+assert.equal(badgeEvents().at(-1).soChuaDoc, 0,
+  'When the only unread chat becomes read, badge must clear');
+assert.equal(window.__mnNotificationStatus().dockBadgeCount, 0);
+
+rows = [];
+mutationCallback();
+runTimers();
+assert.equal(badgeEvents().at(-1).nguonBadge, 'unknown',
+  'No rendered chat list must clear stale Dock badge instead of inventing a global count');
+assert.equal(window.__mnNotificationStatus().dockBadgeCount, null);
+
+rows = [row('/t/carol', 'Carol', 'Unread conversation', true)];
+mutationCallback();
+runTimers();
+assert.equal(badgeEvents().at(-1).soChuaDoc, 1, 'Badge must recover when list reappears');
+
+// Check that no old 3-second polling loop reads the unrelated header count.
+const badgeSwift = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'main.swift'), 'utf8');
+assert.doesNotMatch(badgeSwift, /document\.querySelectorAll\('\[aria-label\^="Đoạn chat"/,
+  'Legacy Chats navigation aria polling must be removed');
+assert.match(badgeSwift, /d\["nguonBadge"\]/,
+  'Native Dock badge must require source labeling from conversation rows');
+assert.match(badgeSwift, /Dock badge: /, 'Notification Diagnostics must show Dock badge source');
+
 console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');
