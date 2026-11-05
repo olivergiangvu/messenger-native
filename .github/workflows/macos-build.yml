@@ -19,6 +19,7 @@ on:
       - feature/notification-event-freshness
       - feature/notification-center-history
       - feature/reels-default-browser
+      - feature/notification-relative-time-fix
   workflow_dispatch:
 
 concurrency:
@@ -50,6 +51,7 @@ jobs:
           node Tests/NotificationEmojiTests.cjs
           node Tests/NotificationNavigationTests.cjs
           node Tests/IncomingCallAudioTests.cjs
+          node Tests/CallRecoveryPerformanceTests.cjs
           node Tests/MenuLocalizationTests.cjs
           node Tests/InterfaceLocalizationTests.cjs
       - name: Validate macOS localization resources
@@ -62,7 +64,9 @@ jobs:
           plutil -lint "Ma nguon/vi.lproj/InfoPlist.strings"
           plutil -lint "Ma nguon/Info.plist"
       - name: Validate developer installer shell syntax
-        run: bash -n install-local.sh
+        run: |
+          bash -n install-local.sh
+          bash -n scripts/profile-memory.sh
       - name: Build unsigned test application (ad hoc)
         env:
           KY_APP: "-"

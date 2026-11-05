@@ -95,12 +95,20 @@ let jsThongBao = """
   // Cách làm: 2 giây/lần xem 15 dòng chat đầu; dòng chưa đọc = có chữ ĐẬM; dòng chưa đọc có DÒNG TIN (chữ thứ 2) mới → báo.
   // 15 giây đầu sau khi mở trang chỉ ghi nhớ, không báo (tránh báo nhầm lúc danh sách vừa tải – 08:19, 08:21 03/11).
   // ĐO: tổng thời gian các vòng dò chạy trên trang, 5 phút ghi 1 lần (kiểm app có làm trang nặng không)
-  const ton = {}, tinhTon = (ten, f) => { const t = performance.now(); try { f(); } finally { ton[ten] = (ton[ten] || 0) + performance.now() - t; } };
+  // Performance sampling only in explicit VM_NHIP diagnostics mode.
+  // Ordinary idle sessions should not accumulate timing samples every call scan.
+  const ton = {}, tinhTon = (ten, f) => {
+    if (!window.__vmNhip) return f();
+    const t = performance.now();
+    try { return f(); } finally { ton[ten] = (ton[ten] || 0) + performance.now() - t; }
+  };
   let tuLuc = performance.now();
   const ghiTon = () => { guiSwift({ nhatKy: 'ĐO JS ' + ((performance.now() - tuLuc) / 1000).toFixed(0) + 's: ' +
       Object.entries(ton).map(([k, v]) => k + ' ' + v.toFixed(0) + 'ms').join(', ') });
     Object.keys(ton).forEach(k => ton[k] = 0); tuLuc = performance.now(); };
-  setTimeout(() => { ghiTon(); setInterval(ghiTon, 300000); }, 60000);   // lần đầu sau 1 phút, rồi 5 phút/lần
+  if (window.__vmNhip) {
+    setTimeout(() => { ghiTon(); setInterval(ghiTon, 300000); }, 60000);
+  }
   // Conversation snapshots and queued notifications are now handled by
   // notification-engine.js (separate, testable module). Keep the helpers below
   // for the independent incoming-call detector.
@@ -295,6 +303,8 @@ let jsThongBao = """
       henQuetGoi = false;
       soQuetTuObserver++;
       quetHopGoi();
+      // Keep the recovery scan responsive during calls; idle scans can be slower.
+      lapQuetPhucHoi();
     }, 70);
   };
   let observerCuocGoi = null;
@@ -327,13 +337,28 @@ let jsThongBao = """
   } else {
     batQuanSatCuocGoi();
   }
-  setInterval(() => {
-    if (!observerCuocGoi) batQuanSatCuocGoi();
-    quetHopGoi();
-  }, 700);
+  // Observer still responds to incoming dialog mutations in ~70ms.
+  // Without a call, halve expensive full-dialog scans (700 -> 1400ms);
+  // while an incoming call is visible, preserve the existing 700ms fallback
+  // for heartbeat and reliable 1100ms dismiss debounce.
+  // If the observer is missing, retain the original 700ms recovery interval.
+  let henQuetPhucHoi = null, soQuetPhucHoi = 0, trePhucHoiMs = 700;
+  function lapQuetPhucHoi() {
+    if (henQuetPhucHoi !== null) clearTimeout(henQuetPhucHoi);
+    trePhucHoiMs = (!observerCuocGoi || !!hopCu) ? 700 : 1400;
+    henQuetPhucHoi = setTimeout(() => {
+      henQuetPhucHoi = null;
+      if (!observerCuocGoi) batQuanSatCuocGoi();
+      soQuetPhucHoi++;
+      quetHopGoi();
+      lapQuetPhucHoi();
+    }, trePhucHoiMs);
+  }
+  lapQuetPhucHoi();
   window.__mnCallDetectionStatus = () => ({
-    version: '1.0', observerAttached: ganObserverGoi,
+    version: '1.1-adaptive-idle', observerAttached: ganObserverGoi,
     scans: soLanQuetGoi, observerScans: soQuetTuObserver,
+    recoveryPolls: soQuetPhucHoi, recoveryDelayMs: trePhucHoiMs,
     incomingDialogActive: !!hopCu
   });
 
