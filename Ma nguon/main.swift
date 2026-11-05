@@ -436,6 +436,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let callRinger = IncomingCallRinger()
     var callWindowsByPath: [String: NSWindow] = [:]
     var duplicateCallPopupsBlocked = 0
+    private var lastExternalReel: (url: String, at: Date)?
+    private var suppressedDuplicateReelOpens = 0
     var dockUnreadBadge: Int? = nil
     var dockBadgeScope = "unknown"
     var dockRowsVisible = 0
@@ -547,8 +549,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSLog("MN NOTI ERROR: missing notification-navigation.js")
         }
 
-        // Intercept at documentStart, before Messenger's React click handlers.
-        // No extra WKWebView is created for a Reel thumbnail.
+        // Intercept video/Reel clicks at documentStart and hand off to the
+        // default browser. Never create an embedded Reel iframe or player.
+        // Messenger's original chat preview/thumbnail remains unchanged.
         if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
            let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
             cauHinh.userContentController.addUserScript(
@@ -615,7 +618,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
            let url = URL(string: raw),
            let reel = LinkRouting.canonicalReel(url),
            message.webView == webView {
-            NSWorkspace.shared.open(reel)
+            moReelNgoai(reel)
             return
         }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
@@ -757,30 +760,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: Điều hướng – link trong app hay mở ra trình duyệt
 
-    /// Fallback for React-driven navigation/window.open which bypasses the
-    /// document's anchor click handler. We never spawn a Reel WKWebView.
-    private func moReelTrongHoiThoai(_ url: URL, trong trang: WKWebView) {
-        guard let reel = LinkRouting.canonicalReel(url),
-              let encoded = try? JSONSerialization.data(withJSONObject: reel.absoluteString,
-                                                         options: [.fragmentsAllowed]),
-              let quoted = String(data: encoded, encoding: .utf8) else {
-            NSWorkspace.shared.open(url)
+    /// All Facebook Reel/video links open in the user's macOS default browser.
+    /// Keep the Messenger message card/thumbnail in the chat; never create
+    /// an iframe or a separate playback WKWebView inside the app.
+    private func moReelNgoai(_ url: URL) {
+        guard let destination = LinkRouting.externalFacebookVideoURL(url) else { return }
+        // React may emit both a synthetic click and window.open for one user
+        // gesture. Avoid opening two browser tabs for the same target.
+        let now = Date()
+        if let prior = lastExternalReel, prior.url == destination.absoluteString,
+           now.timeIntervalSince(prior.at) >= 0,
+           now.timeIntervalSince(prior.at) < 1.25 {
+            suppressedDuplicateReelOpens += 1
+            NSLog("MN REEL: duplicate browser handoff blocked")
             return
         }
-        let script = "Boolean(window.__mnOpenReelFromNative && window.__mnOpenReelFromNative(\(quoted)))"
-        trang.evaluateJavaScript(script) { result, error in
-            if let error {
-                NSLog("MN REEL: native fallback failed: %@", error.localizedDescription)
-            }
-            if result as? Bool != true {
-                // Script missing, no identifiable chat anchor, or injection blocked.
-                // Respect the user's click rather than silently losing it.
-                NSLog("MN REEL: no inline target; opening default browser")
-                NSWorkspace.shared.open(reel)
-            } else {
-                NSLog("MN REEL: inline player inserted via native fallback")
-            }
-        }
+        lastExternalReel = (destination.absoluteString, now)
+        NSWorkspace.shared.open(destination)
+        NSLog("MN REEL: opened in default browser")
     }
 
     /// Meta can create an about:blank popup first and only then navigate it
@@ -814,10 +811,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             callWindowsByPath[target.path] = callWindow
             callRinger.stop(reason: "call window navigating to groupcall")
         }
-        // Also recover about:blank popups that later navigate to a Reel.
-        // Navigation inside the actual embedded video iframe is unaffected.
-        if action.sourceFrame.isMainFrame, LinkRouting.isReel(target) {
-            moReelTrongHoiThoai(target, trong: self.webView)
+        // Catch React-driven main-frame navigation and about:blank popups
+        // that later resolve to a Reel or Facebook video share.
+        if action.sourceFrame.isMainFrame,
+           LinkRouting.externalFacebookVideoURL(target) != nil {
+            moReelNgoai(target)
             dongPopupRongNeuCan(webView)
             return decisionHandler(.cancel)
         }
@@ -1296,8 +1294,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
         let target = linkThat(url) ?? url
-        if action.sourceFrame.isMainFrame, LinkRouting.isReel(target) {
-            moReelTrongHoiThoai(target, trong: self.webView)
+        if action.sourceFrame.isMainFrame,
+           LinkRouting.externalFacebookVideoURL(target) != nil {
+            moReelNgoai(target)
             dongPopupRongNeuCan(webView)
             return nil
         }
@@ -1611,7 +1610,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if let error {
                 alert.informativeText = "Không thể đọc script: \(error.localizedDescription)"
             } else {
-                alert.informativeText = (result as? String) ?? "Không nhận được trạng thái."
+                alert.informativeText = ((result as? String) ?? "Không nhận được trạng thái.")
+                    + "\nNative duplicate browser opens suppressed: \(self.suppressedDuplicateReelOpens)"
             }
             alert.addButton(withTitle: "Đóng")
             NSApp.activate(ignoringOtherApps: true)
