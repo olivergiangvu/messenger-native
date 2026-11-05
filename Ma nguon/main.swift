@@ -616,9 +616,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard let d = message.body as? [String: Any] else { return }
         if let raw = d["moNgoaiReel"] as? String,
            let url = URL(string: raw),
-           let reel = LinkRouting.canonicalReel(url),
+           LinkRouting.externalFacebookVideoURL(url) != nil,
            message.webView == webView {
-            moReelNgoai(reel)
+            moReelNgoai(url)
             return
         }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
