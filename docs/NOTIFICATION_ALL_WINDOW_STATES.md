@@ -37,12 +37,24 @@ there is no access to Meta's authoritative server event stream.
   messages unless there is a known previous preview.
 - An explicitly outgoing first-person preview (e.g. `You:`, `Bạn:`,
   `You sent` or `Bạn đã gửi`) is ignored, including in the open chat.
+- An **unsent local composer draft** is not a new message. Ignore
+  conversation-list previews beginning with `Draft:`, `Bản nháp:` or
+  `Nháp:` even if the focused conversation's preview changes every
+  keystroke. This fixes a user-reproduced false banner for
+  `Draft: mà mới lắp đã rỉ như` while composing in the selected chat.
+- If the user sends that draft and Messenger displays the **same exact
+  draft text** without a `You:` prefix, ignore that one local
+  draft-to-sent transition. A later different inbound preview still
+  qualifies.
 - For the currently selected chat, a changed preview can qualify even when
   the unread marker is already gone.
 - React/DOM observer is primary; a 3.5-second timer remains the fallback.
 
 **Limitation:** Messenger Web may not label all outgoing messages
 consistently, and repeated identical preview strings may look unchanged.
+A genuine incoming message that literally begins with `Draft:` may look
+identical to Messenger's local draft marker in text-only DOM previews,
+so exact sender classification is not guaranteed without Meta's event feed.
 This code cannot promise perfect sender identification, zero false
 positives, or 100% notification delivery. Further hardening needs live
 DOM examples, not guesses.
@@ -73,6 +85,7 @@ are bundled. No separate language switch is introduced.
 - `foregroundSent`: DOM notifications sent when window was focused
 - `selectedChatSent`: notifications from the currently selected chat
 - `selfMessageSkipped`: outgoing-preview candidates suppressed
+- `draftSkipped`: local draft edits and exact draft-to-sent transitions suppressed
 
 These are counters only; no chat IDs, contact names or message text are
 logged or returned.
@@ -95,11 +108,17 @@ logged or returned.
    conversation and verify it does **not** notify. Send the same
    text as a genuine inbound message, where the sender is detectable,
    and report any mistaken suppression.
-7. Verify notification sound is not doubled on foreground delivery.
-8. Confirm Unicode emoji in preview and clean `Unread message` labels.
-9. Test macOS Focus on/off: Focus policy may deliberately mute/hide
-   banners; the app cannot override it.
-10. Open Web Inspector console and run
+7. While Messenger Native is focused on an open chat, type and edit an
+   **unsent draft**. The sidebar shows `Draft: …`, but macOS must **not**
+   display any notification. Repeat after closing and reopening the chat.
+   Sending that exact draft also must not notify the sender.
+8. Receive a genuine new message after the draft and confirm it still
+   notifies.
+9. Verify notification sound is not doubled on foreground delivery.
+10. Confirm Unicode emoji in preview and clean `Unread message` labels.
+11. Test macOS Focus on/off: Focus policy may deliberately mute/hide
+    banners; the app cannot override it.
+12. Open Web Inspector console and run
     `window.__mnNotificationStatus()` for counters if behavior fails.
 
 ## Install
