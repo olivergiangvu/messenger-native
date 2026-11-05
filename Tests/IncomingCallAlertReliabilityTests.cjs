@@ -65,8 +65,12 @@ assert.equal(context.find('Accept'), null, 'only call text without decline contr
 
 assert.match(swift, /private func scheduleCallFallbackNotification\(\)/);
 assert.match(swift, /if callRinger\.sessionsStarted > sessionsBefore/);
-assert.match(swift, /guard self\.goiDen == nil, self\.callRinger\.isRinging else \{ return \}/);
+assert.match(swift, /guard self\.goiDen == nil else \{ return \}/);
+assert.doesNotMatch(swift, /guard self\.goiDen == nil, self\.callRinger\.isRinging/);
+assert.match(swift, /sendNativeIncomingCallNotification\(source: "confirmed dialog"/);
+assert.match(swift, /callAlertGate\.ringtoneSignal\(at: Date\(\)\)/);
+assert.match(swift, /callRinger\.soundCandidate\(elementToken: d\["audioElementToken"\] as\? String\)/);
 assert.match(swift, /cancelCallFallbackNotification\(dialogConfirmed: true\)/);
-assert.match(swift, /content\.userInfo = \["mnCallFallback": true\]/);
-assert.match(swift, /"mn-incoming-call-fallback-" \+ UUID\(\)\.uuidString/);
+assert.match(swift, /content\.userInfo = \["mnIncomingCall": true\]/);
+assert.match(swift, /"mn-incoming-call-" \+ UUID\(\)\.uuidString/);
 console.log('Call alert reliability passed: alternate button labels, verified fallback call card, no friend-request false positive, audio fallback guard.');
