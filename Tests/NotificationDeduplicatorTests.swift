@@ -14,8 +14,8 @@ struct NotificationDeduplicatorTests {
         assert(immediate.evaluate(key: keyA, source: "dom", at: time(1)) == .duplicateSameSource)
         assert(immediate.evaluate(key: keyA, source: "web", at: time(3)) == .duplicateCrossSource)
         assert(immediate.evaluate(key: keyB, source: "dom", at: time(3)) == .deliver)
-        assert(immediate.evaluate(key: keyA, source: "dom", at: time(9)) == .duplicateLastPreview,
-               "A recently displayed identical last preview must not generate new banners")
+        assert(immediate.evaluate(key: keyA, source: "dom", at: time(9)) == .deliver,
+               "A different delivered preview advances the conversation; earlier text may be sent again")
 
         var focused = NotificationDeduplicator()
         focused.didResignActive(at: time(10))
