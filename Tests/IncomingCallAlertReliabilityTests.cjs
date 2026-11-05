@@ -63,7 +63,7 @@ partialControls.push(partial);
 buttons.push(partial);
 assert.equal(context.find('Accept'), null, 'only call text without decline control is insufficient');
 
-assert.match(swift, /private func scheduleCallFallbackNotification\(\)/);
+assert.match(swift, /private func scheduleCallFallbackNotification\(source: String\)/);
 assert.match(swift, /if callRinger\.sessionsStarted > sessionsBefore/);
 assert.match(swift, /guard self\.goiDen == nil else \{ return \}/);
 assert.doesNotMatch(swift, /guard self\.goiDen == nil, self\.callRinger\.isRinging/);
