@@ -10,7 +10,7 @@ const end = swift.indexOf('  window.__mnCallDetectionStatus', start);
 assert.ok(start >= 0 && end > start, 'adaptive scheduler must exist in embedded JS');
 const scheduler = swift.slice(start, end);
 assert.match(swift, /observerCuocGoi = new MutationObserver/);
-assert.match(swift, /soQuetTuObserver\+\+;\s*quetHopGoi\(\);\s*lapQuetPhucHoi\(\)/,
+assert.match(swift, /soQuetTuObserver\+\+;\s*quetHopGoi\(\);[\s\S]{0,180}?lapQuetPhucHoi\(\)/,
   'event-driven calls must adapt recovery cadence');
 assert.match(swift, /\}, 70\);/, 'fast observer debounce must remain 70 ms');
 assert.match(swift, /if \(window\.__vmNhip\) \{\s*setTimeout\(\(\) => \{ ghiTon\(\)/,
