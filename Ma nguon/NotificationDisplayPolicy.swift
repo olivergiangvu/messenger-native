@@ -1,14 +1,14 @@
 import Foundation
 
-/// Presentation-only policy; event detection and notification tap routing
-/// remain unchanged. macOS uses the request identifier to replace a previous
-/// delivered card when a newer message from the same conversation arrives.
+/// Presentation-only policy; event detection and tap routing stay unchanged.
+/// Keep each accepted incoming event's unique ID so Notification Center can
+/// retain history. Grouping uses threadIdentifier, not a shared request ID.
 enum NotificationDisplayPolicy {
     static func requestIdentifier(path: String?, originalID: String) -> String {
-        guard let path, path.hasPrefix("/t/"), path.count < 140 else {
-            return originalID
-        }
-        return "mn-chat:" + path
+        // DOM and intercepted Web notification engines already generate
+        // unique IDs for accepted events. Keep them to preserve history.
+        // Existing deduplication removes false events before this step.
+        return originalID
     }
 
     static func isGenericStatus(_ body: String) -> Bool {

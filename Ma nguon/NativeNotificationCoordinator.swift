@@ -15,9 +15,7 @@ final class NativeNotificationCoordinator {
     private(set) var webEventsWithoutThread = 0
     private(set) var webSubmittedWithoutThread = 0
     private(set) var domSubmitted = 0
-    private(set) var threadCardsReplaced = 0
     private var richPreviewByThread: [String: Date] = [:]
-    private var knownThreadCards: Set<String> = []
 
     func didResignActive() {
         deduplicator.didResignActive()
@@ -136,19 +134,15 @@ final class NativeNotificationCoordinator {
             content.userInfo = ["mnConversationPath": path]
         }
 
-        // A stable request ID for each known conversation replaces the
-        // previous Notification Center card; a different message can still
-        // display a fresh banner. Unlike unique random IDs, this avoids a
-        // long stack of cards from the same chat. Unknown web event routes
-        // retain their original IDs instead of merging unrelated threads.
-        // Test notifications must always have unique IDs.
+        // Keep each accepted event's unique request ID so the user can see
+        // previous incoming messages in Notification Center. The native
+        // threadIdentifier above still lets macOS group cards by chat when
+        // Notification Center's grouping preference is enabled.
+        // Deduplication and generic-status suppression happen before this.
+        // No notifications are combined by person name (not unique).
         let requestID = source == "test"
             ? id : NotificationDisplayPolicy.requestIdentifier(path: path, originalID: id)
         if source != "test", let path {
-            if knownThreadCards.contains(path) {
-                threadCardsReplaced += 1
-            }
-            knownThreadCards.insert(path)
             if !genericStatus {
                 richPreviewByThread[path] = Date()
             }
@@ -157,10 +151,6 @@ final class NativeNotificationCoordinator {
             }
             if richPreviewByThread.count > 75 {
                 richPreviewByThread.removeAll(keepingCapacity: true)
-            }
-            if knownThreadCards.count > 250 {
-                knownThreadCards.removeAll(keepingCapacity: true)
-                knownThreadCards.insert(path)
             }
         }
 
@@ -197,6 +187,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Generic suppressed: \(genericStatusSuppressed) | Thread cards replaced: \(threadCardsReplaced) | DOM submitted: \(domSubmitted) | Web submitted: \(webSubmitted) | Web no-thread received: \(webEventsWithoutThread) | Web no-thread submitted: \(webSubmittedWithoutThread) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Generic suppressed: \(genericStatusSuppressed) | DOM submitted: \(domSubmitted) | Web submitted: \(webSubmitted) | Web no-thread received: \(webEventsWithoutThread) | Web no-thread submitted: \(webSubmittedWithoutThread) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
     }
 }

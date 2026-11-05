@@ -16,6 +16,7 @@ on:
       - feature/notification-all-window-states
       - feature/notification-focus-dedup
       - feature/dock-unread-accuracy
+      - feature/notification-event-freshness
   workflow_dispatch:
 
 concurrency:
