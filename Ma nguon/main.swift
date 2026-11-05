@@ -370,11 +370,29 @@ let jsThongBao = """
     if (!observerCuocGoi) batQuanSatCuocGoi();
     quetHopGoi();
   }, 700);
-  window.__mnCallDetectionStatus = () => ({
-    version: '1.0', observerAttached: ganObserverGoi,
-    scans: soLanQuetGoi, observerScans: soQuetTuObserver,
-    incomingDialogActive: !!hopCu
-  });
+  window.__mnCallDetectionStatus = () => {
+    // One-shot read, never a resident timer or message-content collection.
+    const labels = [...document.querySelectorAll('[aria-label]')];
+    return {
+      version: '1.2-call-bridge-inspection',
+      installed: true,
+      host: location.hostname,
+      routeFamily: location.pathname.startsWith('/messages') ? '/messages'
+        : location.pathname.startsWith('/t/') ? '/t/'
+        : location.pathname.startsWith('/groupcall') ? '/groupcall' : 'other',
+      documentReady: document.readyState,
+      pageHidden: document.hidden,
+      pageFocused: document.hasFocus(),
+      observerAttached: ganObserverGoi,
+      scans: soLanQuetGoi,
+      observerScans: soQuetTuObserver,
+      incomingDialogActive: !!hopCu,
+      openDialogElements: document.querySelectorAll('[role="dialog"],[role="alertdialog"]').length,
+      acceptOrAnswerButtons: labels.filter(e => nhanChapNhanGoi.test(nhanNut(e))).length,
+      declineButtons: labels.filter(e => nhanTuChoiGoi.test(nhanNut(e))).length,
+      iframes: document.querySelectorAll('iframe').length
+    };
+  };
 
   window.__vmBamGoiDen = (nhan) => {
     const e = nutGoiDen(nhan) || nutGoiDen(nhan === 'Chấp nhận' ? 'Accept' : 'Decline');
@@ -1717,6 +1735,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             Pending fallback: \(self.pendingCallFallback != nil)
             Main Messenger window currently visible: \(self.window.isVisible)
             App currently active: \(NSApp.isActive)
+            Current WebView host: \(self.webView.url?.host ?? "unavailable")
+            Current WebView route family: \((self.webView.url?.path ?? "").hasPrefix("/messages") ? "/messages" : (self.webView.url?.path ?? "").hasPrefix("/t/") ? "/t/" : "other")
+            Main WebView loading: \(self.webView.isLoading)
 
             Audio bridge: \((value as? String) ?? "Unavailable: \(error?.localizedDescription ?? "unknown")")
 
@@ -1724,8 +1745,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             the duplicate may originate in Messenger's server-side history.
             """
             dialog.addButton(withTitle: "Đóng")
+            dialog.addButton(withTitle: "Thử banner")
+            dialog.addButton(withTitle: "Thử bảng nổi")
             NSApp.activate(ignoringOtherApps: true)
-            dialog.runModal()
+            switch dialog.runModal() {
+            case .alertSecondButtonReturn:
+                self.thuBannerCuocGoi()
+            case .alertThirdButtonReturn:
+                self.thuBangNoiCuocGoi()
+            default:
+                break
+            }
+        }
+    }
+
+    private func thuBannerCuocGoi() {
+        let content = UNMutableNotificationContent()
+        content.title = "TEST — Messenger Native"
+        content.body = "Thử banner cuộc gọi. Đây không phải cuộc gọi thật."
+        content.sound = .default
+        content.userInfo = ["mnCallUiTest": true]
+        let request = UNNotificationRequest(
+            identifier: "mn-call-ui-test-" + UUID().uuidString,
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("MN CALL TEST: banner failed: %@", error.localizedDescription)
+            } else {
+                NSLog("MN CALL TEST: test banner submitted")
+            }
+        }
+    }
+
+    private func thuBangNoiCuocGoi() {
+        // Standalone visual test: never set goiDen, play a ringtone, invoke
+        // __vmBamGoiDen or interact with a live conversation.
+        guard goiDen == nil else { return }
+        let preview = BangGoiDen()
+        preview.tieuDe.stringValue = "THỬ NGHIỆM — không phải cuộc gọi"
+        preview.chu.stringValue = "Kiểm tra bảng nổi Messenger"
+        preview.bam = { [weak preview] _ in preview?.orderOut(nil) }
+        let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+        if let screen {
+            preview.setFrameOrigin(NSPoint(
+                x: screen.maxX - preview.frame.width - 16,
+                y: screen.maxY - preview.frame.height - 12))
+        }
+        preview.orderFrontRegardless()
+        NSLog("MN CALL TEST: floating call panel shown")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            preview.orderOut(nil)
         }
     }
 
