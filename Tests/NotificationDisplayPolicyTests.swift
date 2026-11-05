@@ -10,9 +10,10 @@ struct NotificationDisplayPolicyTests {
         let other = NotificationDisplayPolicy.requestIdentifier(
             path: "/t/987654321", originalID: "mn-random-3")
 
-        assert(a == b, "New messages in one chat must replace its previous Notification Center card")
+        assert(a != b, "Two accepted new messages in one chat must retain separate Notification Center cards")
         assert(a != other, "Different conversations must retain distinct cards")
-        assert(a == "mn-chat:/t/123456789")
+        assert(a == "mn-random-1" && b == "mn-random-2",
+               "Keep original event-specific IDs; rely on threadIdentifier for grouping")
         assert(NotificationDisplayPolicy.requestIdentifier(path: nil,
             originalID: "web-event-1") == "web-event-1")
         assert(NotificationDisplayPolicy.requestIdentifier(path: "/invalid",
@@ -28,6 +29,6 @@ struct NotificationDisplayPolicyTests {
             assert(!NotificationDisplayPolicy.isGenericStatus(real),
                    "Real message must not be labelled generic: \(real)")
         }
-        print("Notification display policy passed: stable per-thread cards, generic placeholder recognition")
+        print("Notification display policy passed: separate message cards, per-chat grouping is retained in native content, generic status recognition")
     }
 }
