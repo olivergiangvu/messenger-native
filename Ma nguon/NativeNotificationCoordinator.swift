@@ -10,6 +10,14 @@ final class NativeNotificationCoordinator {
     private(set) var crossSourceDuplicates = 0
     private(set) var focusReplays = 0
     private(set) var lastPreviewRepeats = 0
+    private(set) var genericStatusSuppressed = 0
+    private(set) var webSubmitted = 0
+    private(set) var webEventsWithoutThread = 0
+    private(set) var webSubmittedWithoutThread = 0
+    private(set) var domSubmitted = 0
+    private(set) var threadCardsReplaced = 0
+    private var richPreviewByThread: [String: Date] = [:]
+    private var knownThreadCards: Set<String> = []
 
     func didResignActive() {
         deduplicator.didResignActive()
@@ -62,6 +70,26 @@ final class NativeNotificationCoordinator {
         }
         let rawThread = payload["duongDan"] as? String ?? payload["tag"] as? String ?? ""
         let path = conversationPath(rawThread)
+        if source == "web" && path == nil {
+            // This Web Notification event has no validated /t/<thread>.
+            // Do not invent a thread identity from a display name:
+            // different people or groups can share the same name.
+            webEventsWithoutThread += 1
+        }
+        let genericStatus = NotificationDisplayPolicy.isGenericStatus(body)
+
+        // Generic Web status such as "Unread message:" is not a message
+        // preview. If a richer message notification for this exact chat was
+        // just submitted, do not replace it with a placeholder.
+        if source != "test", let path, genericStatus,
+           let richAt = richPreviewByThread[path],
+           Date().timeIntervalSince(richAt) >= 0,
+           Date().timeIntervalSince(richAt) < 90 {
+            genericStatusSuppressed += 1
+            suppressed += 1
+            NSLog("MN NOTI: generic status after rich chat preview suppressed")
+            return
+        }
 
         // De-duplicate at the shared Swift boundary, not only in one JS
         // source: same-source replays and cross-source web/DOM overlap.
@@ -108,7 +136,35 @@ final class NativeNotificationCoordinator {
             content.userInfo = ["mnConversationPath": path]
         }
 
-        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        // A stable request ID for each known conversation replaces the
+        // previous Notification Center card; a different message can still
+        // display a fresh banner. Unlike unique random IDs, this avoids a
+        // long stack of cards from the same chat. Unknown web event routes
+        // retain their original IDs instead of merging unrelated threads.
+        // Test notifications must always have unique IDs.
+        let requestID = source == "test"
+            ? id : NotificationDisplayPolicy.requestIdentifier(path: path, originalID: id)
+        if source != "test", let path {
+            if knownThreadCards.contains(path) {
+                threadCardsReplaced += 1
+            }
+            knownThreadCards.insert(path)
+            if !genericStatus {
+                richPreviewByThread[path] = Date()
+            }
+            richPreviewByThread = richPreviewByThread.filter {
+                Date().timeIntervalSince($0.value) < 5 * 60
+            }
+            if richPreviewByThread.count > 75 {
+                richPreviewByThread.removeAll(keepingCapacity: true)
+            }
+            if knownThreadCards.count > 250 {
+                knownThreadCards.removeAll(keepingCapacity: true)
+                knownThreadCards.insert(path)
+            }
+        }
+
+        let request = UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -119,7 +175,12 @@ final class NativeNotificationCoordinator {
                     NSLog("MN NOTI: submission failed: %@", self.lastSubmissionError)
                 } else {
                     self.submitted += 1
-                    NSLog("MN NOTI: submitted to macOS (not proof of banner display)")
+                    if source == "dom" { self.domSubmitted += 1 }
+                    if source == "web" {
+                        self.webSubmitted += 1
+                        if path == nil { self.webSubmittedWithoutThread += 1 }
+                    }
+                    NSLog("MN NOTI: submitted source %@ to macOS (not proof of banner display)", source)
                 }
             }
         }
@@ -136,6 +197,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Generic suppressed: \(genericStatusSuppressed) | Thread cards replaced: \(threadCardsReplaced) | DOM submitted: \(domSubmitted) | Web submitted: \(webSubmitted) | Web no-thread received: \(webEventsWithoutThread) | Web no-thread submitted: \(webSubmittedWithoutThread) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
     }
 }

@@ -89,11 +89,30 @@ vm.runInNewContext(source, {
 });
 
 const received = () => messages.filter((item) => item.id && item.nguon === 'dom');
-rows = [row('/t/alice', 'Alice', 'Old preview')];
+rows = [
+  row('/t/alice', 'Alice', 'Old preview'),
+  row('/t/bob', 'Bob', 'Old Bob preview'),
+  row('/t/carol', 'Carol', 'Old Carol preview'),
+  row('/t/david', 'David', 'Old David preview'),
+  row('/t/group', 'Project Group', 'Minh: Old document', true, true)
+];
 intervals[0]();  // Bind observer once rows exist.
 runTimers();
 assert.equal(window.__mnNotificationStatus().initialized, true);
 assert.equal(received().length, 0, 'Initial load must not flood old unread previews');
+
+// An unread row brought into the top of the list during scrolling, an
+// archived chat becoming visible, or WebKit restoration is not a new event.
+rows = [
+  row('/t/archived', 'Old unread conversation', 'An old 21-minute message', true),
+  row('/t/alice', 'Alice', 'Old preview'),
+  row('/t/bob', 'Bob', 'Old Bob preview')
+];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 0,
+  'A previously unseen top unread chat must be baselined, never reported as fresh');
+assert.equal(window.__mnNotificationStatus().staleCandidatesBlocked, 1);
 
 // First update after losing focus must notify; no "first blur" discard.
 hidden = true;
