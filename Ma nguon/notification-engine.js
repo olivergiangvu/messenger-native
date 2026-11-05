@@ -33,6 +33,10 @@
   let selfMessageSkipped = 0;
   let draftSkipped = 0;
   let localSendSkipped = 0;
+  let dockBadgeCount = null;
+  let dockBadgeState = 'unknown';
+  let dockRowsVisible = 0;
+  let dockBadgeUpdates = 0;
   const recentLocalText = new Map();
   const LOCAL_TEXT_TTL_MS = 12000;
   const MAX_LOCAL_TEXTS = 8;
@@ -313,15 +317,47 @@
     tick();
   }
 
+  // A Dock badge is a count of rendered unread CONVERSATIONS, not the
+  // separate Chats navigation tab's "N unread messages" accessibility
+  // label. That label can include items not visible in this list and has
+  // different semantics. Never fabricate a global unread count.
+  function publishDockBadge(items) {
+    const observable = Array.isArray(items) && items.length > 0;
+    const count = observable ? new Set(items.filter(item => item.unread)
+      .map(item => item.path)).size : null;
+    const state = observable ? 'rendered-conversations' : 'unknown';
+    const visibleRows = observable ? items.length : 0;
+    if (state === dockBadgeState && count === dockBadgeCount &&
+        visibleRows === dockRowsVisible) return;
+    dockBadgeState = state;
+    dockBadgeCount = count;
+    dockRowsVisible = visibleRows;
+    dockBadgeUpdates += 1;
+    send({
+      nguonBadge: state,
+      soChuaDoc: count === null ? 0 : count,
+      soDongHienThi: visibleRows
+    });
+  }
+
   function scan(reason) {
     scheduled = false;
     if (/groupcall/.test(location.pathname)) return;
     scans += 1;
     const rows = Array.from(document.querySelectorAll('[role="row"]')).slice(0, MAX_ROWS);
-    if (!rows.length) { lastEvent = 'no-conversation-rows'; return; }
+    if (!rows.length) {
+      publishDockBadge(null); // clear stale Dock badge during transitions
+      lastEvent = 'no-conversation-rows';
+      return;
+    }
     const now = Date.now();
     const current = rows.map((row, index) => parse(row, index)).filter(Boolean);
-    if (!current.length) { lastEvent = 'rows-no-chat-links'; return; }
+    if (!current.length) {
+      publishDockBadge(null);
+      lastEvent = 'rows-no-chat-links';
+      return;
+    }
+    publishDockBadge(current);
     const foreground = isForeground();
     if (!initialized) {
       for (const item of current) {
@@ -429,6 +465,7 @@
     initialized, scans, sent, pending: pending.length,
     foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
     localSendSkipped,
+    dockBadgeState, dockBadgeCount, dockRowsVisible, dockBadgeUpdates,
     trackedConversations: conversations.size,
     observerAttached: !!observer, lastEvent
   });
