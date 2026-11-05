@@ -187,6 +187,47 @@ assert.equal(received().length, 15, 'Unread toggle or focus change is not a new 
 assert.equal(window.__mnNotificationStatus().foregroundSent, 3);
 assert.equal(window.__mnNotificationStatus().sent, 15);
 
+// Real-world regression: an unsent composer draft in the selected thread
+// changes the sidebar preview ("Draft: …") while focus stays on Messenger.
+// This must NEVER generate a native message notification.
+currentPath = '/t/alice';
+hidden = false;
+focused = true;
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Draft: mà mới lắp đã rỉ như', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 15, 'Typing an unsent Draft: must not notify');
+assert.equal(window.__mnNotificationStatus().lastEvent, 'draft-change-suppressed');
+
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Draft: mà mới lắp đã rỉ như nhé 😅', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 15, 'Editing a draft must not repeatedly notify');
+
+// Localized UI labels are also not incoming messages.
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Bản nháp: nội dung đang gõ', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 15, 'Vietnamese draft label must not notify');
+
+// A group draft must not be misinterpreted as a new message from "Draft".
+currentPath = '/t/group';
+rows = [row('/t/group', 'Project Group', 'Draft: chỉ là bản nháp', false, true)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 15, 'Group chat drafts must not notify');
+
+// A genuinely changed incoming preview is still delivered even if the
+// selected conversation auto-marks it read after a draft is removed.
+currentPath = '/t/alice';
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Tin mới đến thật sự', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 16, 'Incoming chat change after drafts must still notify');
+assert.equal(received().at(-1).noiDung, 'Tin mới đến thật sự');
+assert.equal(window.__mnNotificationStatus().draftSkipped, 4);
+assert.equal(window.__mnNotificationStatus().sent, 16);
+
 // Presentation must also be enabled on macOS when the application is active.
 const nativeApp = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'main.swift'), 'utf8');
 assert.match(nativeApp, /xong\(\[\.banner, \.sound, \.list\]\)/,
@@ -200,4 +241,4 @@ const webChimeHandler = nativeApp.slice(
 assert.doesNotMatch(webChimeHandler, /NSSound\(/,
   'Native notification sounds must not be doubled by a manual focused-app chime');
 
-console.log('Notification engine: focused, visible, background, open chat auto-read, outgoing suppression, unread-only and preview cleanup passed.');
+console.log('Notification engine: focused, visible, background, real incoming, draft suppression, group drafts, emoji and previews passed.');
