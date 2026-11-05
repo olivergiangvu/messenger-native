@@ -64,7 +64,9 @@ jobs:
           plutil -lint "Ma nguon/vi.lproj/InfoPlist.strings"
           plutil -lint "Ma nguon/Info.plist"
       - name: Validate developer installer shell syntax
-        run: bash -n install-local.sh
+        run: |
+          bash -n install-local.sh
+          bash -n scripts/profile-memory.sh
       - name: Build unsigned test application (ad hoc)
         env:
           KY_APP: "-"
