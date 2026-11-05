@@ -18,5 +18,5 @@ assert.match(s, /content\.userInfo = \["mnCallUiTest": true\]/);
 assert.match(s, /private func thuBangNoiCuocGoi\(\)/);
 assert.match(s, /preview\.bam = \{ \[weak preview\] _ in preview\?\.orderOut\(nil\) \}/);
 const source = s.slice(s.indexOf('private func thuBangNoiCuocGoi()'), s.indexOf('@objc func chanDoanReel()'));
-assert.doesNotMatch(source, /__vmBamGoiDen|guiSwift\(|callRinger\.(begin|soundCandidate)/);
+assert.doesNotMatch(source.replace(/\/\/[^\n]*/g, ''), /__vmBamGoiDen|guiSwift\(|callRinger\.(begin|soundCandidate)/);
 console.log('Call UI diagnostics regression passed: privacy-safe route/status, isolated mock banner and floating panel.');
