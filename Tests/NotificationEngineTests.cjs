@@ -15,6 +15,7 @@ let rows = [];
 let hidden = false;
 let focused = true;
 let currentPath = '/';
+const documentListeners = new Map();
 
 const observerRoot = {};
 const row = (href, title, preview, unread = true, group = false) => ({
@@ -36,7 +37,28 @@ const document = {
   querySelector(sel) { return sel === '[role="row"]' ? rows[0] || null : null; },
   querySelectorAll(sel) { return sel === '[role="row"]' ? rows : []; },
   createTreeWalker() { return { nextNode() { return null; } }; },
-  addEventListener() {}
+  activeElement: null,
+  addEventListener(type, callback) {
+    if (!documentListeners.has(type)) documentListeners.set(type, []);
+    documentListeners.get(type).push(callback);
+  }
+};
+
+const emitDocument = (type, event) => {
+  for (const fn of documentListeners.get(type) || []) fn(event);
+};
+const makeComposer = text => {
+  const editor = {
+    innerText: text,
+    getAttribute(key) {
+      return key === 'aria-label' ? 'Message composer' : null;
+    },
+    closest(selector) {
+      return selector.includes('contenteditable') ? this : null;
+    }
+  };
+  document.activeElement = editor;
+  return editor;
 };
 
 const window = {
@@ -249,6 +271,75 @@ assert.equal(received().at(-1).noiDung, 'Người kia vừa phản hồi');
 assert.equal(window.__mnNotificationStatus().draftSkipped, 6);
 assert.equal(window.__mnNotificationStatus().sent, 17);
 
+// Local sends without a preceding Draft: phase are not reliably marked
+// "You:" by Messenger. Capture the actual typed composer text in memory
+// and suppress only a matching changed preview, not another sender's reply.
+currentPath = '/t/alice';
+hidden = false;
+focused = true;
+let composer = makeComposer('Tôi mới gửi từ máy này 😊');
+emitDocument('input', { target: composer });
+emitDocument('keydown', { target: composer, key: 'Enter', shiftKey: false,
+  isComposing: false, metaKey: false, altKey: false, ctrlKey: false });
+// Scans without a changed preview must NOT consume the local fingerprint.
+mutationCallback();
+runTimers();
+assert.equal(received().length, 17);
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Tôi mới gửi từ máy này 😊', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 17, 'Own Enter-to-send must not notify');
+assert.equal(window.__mnNotificationStatus().localSendSkipped, 1);
+assert.equal(window.__mnNotificationStatus().lastEvent, 'local-send-suppressed');
+
+// A real inbound message after a local send must be delivered immediately.
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Tin từ đối phương sau khi tôi gửi', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 18, 'Other party reply must still notify');
+assert.equal(received().at(-1).noiDung, 'Tin từ đối phương sau khi tôi gửi');
+
+// Click on the Send button must work even if the sender text isn't tagged
+// and Messenger never shows an intermediate Draft: sidebar preview.
+composer = makeComposer('Tôi bấm nút gửi');
+emitDocument('input', { target: composer });
+const sendButton = {
+  getAttribute(key) { return key === 'aria-label' ? 'Send' : null; }
+};
+emitDocument('pointerdown', { target: {
+  closest(selector) {
+    return selector.includes('button') ? sendButton : null;
+  }
+}});
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Tôi bấm nút gửi', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 18, 'Own Send-button tap must not notify');
+assert.equal(window.__mnNotificationStatus().localSendSkipped, 2);
+
+// While typing a different message, a new inbound preview must NOT be
+// suppressed simply because Messenger Native is focused and composing.
+composer = makeComposer('Tôi đang soạn, chưa gửi');
+emitDocument('input', { target: composer });
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Người khác gửi tin mới ngay lúc soạn', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 19, 'Real incoming during composing must notify');
+
+// An unmatched search field input is not considered a local chat send.
+const search = {
+  innerText: 'Tìm kiếm trên Messenger',
+  getAttribute(key) { return key === 'aria-label' ? 'Search Messenger' : null; },
+  closest(selector) { return selector.includes('contenteditable') ? this : null; }
+};
+emitDocument('input', { target: search });
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Mới từ người khác', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 20, 'Search input must not block notifications');
+assert.equal(window.__mnNotificationStatus().localSendSkipped, 2);
+assert.equal(window.__mnNotificationStatus().sent, 20);
+
 // Presentation must also be enabled on macOS when the application is active.
 const nativeApp = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'main.swift'), 'utf8');
 assert.match(nativeApp, /xong\(\[\.banner, \.sound, \.list\]\)/,
@@ -262,4 +353,4 @@ const webChimeHandler = nativeApp.slice(
 assert.doesNotMatch(webChimeHandler, /NSSound\(/,
   'Native notification sounds must not be doubled by a manual focused-app chime');
 
-console.log('Notification engine: focused, visible, background, real incoming, draft suppression, group drafts, emoji and previews passed.');
+console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');
