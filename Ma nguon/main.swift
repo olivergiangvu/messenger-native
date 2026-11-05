@@ -56,6 +56,15 @@ let jsThongBao = """
   const guiSwift = (d) => window.webkit.messageHandlers.vmThongBao.postMessage(d);
   guiSwift({ nhatKy: 'Notification gốc của trang: ' + typeof window.Notification });
   const danhSach = {};   // id → đối tượng thông báo, để khi bấm thì gọi lại onclick của trang
+  // Treat only a live incoming-call announcement as a call signal.
+  // Missed/ended calls remain ordinary message notifications.
+  // Do not transmit caller name, preview text or notification URL.
+  const laThongBaoGoiDen = (title, body) => {
+    const text = String(title || '') + ' ' + String(body || '');
+    const active = /incoming[ ]+(?:audio[ ]+|video[ ]+|voice[ ]+)?call|is[ ]+calling|calling[ ]+you|đang gọi|cuộc gọi đến|gọi đến/i.test(text);
+    const ended = /missed[ ]+(?:(?:audio|video)[ ]+)?call|cuộc gọi nhỡ|bỏ lỡ cuộc gọi|missed[ ]+(?:an?[ ]+)?(?:audio|video)[ ]+call|call[ ]+ended|đã kết thúc/i.test(text);
+    return active && !ended;
+  };
   class ThongBao {
     constructor(tieuDe, tuyChon) {
       tuyChon = tuyChon || {};
@@ -66,8 +75,12 @@ let jsThongBao = """
       // Original page callbacks are short-lived; notification taps also carry
       // a stable conversation path in native UNNotificationContent.userInfo.
       setTimeout(() => { delete danhSach[this._id]; }, 15 * 60 * 1000);
-      guiSwift({ id: this._id, tieuDe: this.title, noiDung: this.body,
-                 tag: this.tag, duongDan: this.tag, nguon: 'web' });
+      if (laThongBaoGoiDen(this.title, this.body)) {
+        guiSwift({ mnWebIncomingCallHint: true });
+      } else {
+        guiSwift({ id: this._id, tieuDe: this.title, noiDung: this.body,
+                   tag: this.tag, duongDan: this.tag, nguon: 'web' });
+      }
     }
     close() { guiSwift({ dong: this._id }); delete danhSach[this._id]; }
     addEventListener(loai, ham) { if (loai === 'click') this.onclick = ham; if (loai === 'close') this.onclose = ham; }
