@@ -70,6 +70,8 @@ jobs:
           bash -n install-local.sh
           bash -n scripts/profile-memory.sh
           bash -n scripts/profile-memory-series.sh
+          bash -n scripts/publish-installed-rollback.sh
+          bash scripts/publish-installed-rollback.sh --help
           bash scripts/profile-memory-series.sh --help
       - name: Build unsigned test application (ad hoc)
         env:
