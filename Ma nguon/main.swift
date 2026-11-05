@@ -250,6 +250,14 @@ let jsThongBao = """
     const re = nhan === 'Chấp nhận' || nhan === 'Accept' ? nhanChapNhanGoi
       : nhan === 'Từ chối' || nhan === 'Decline' ? nhanTuChoiGoi : null;
     if (!re) return null;
+    // FIRST preserve the exact proven legacy selector: Messenger can attach
+    // aria-label to a nested span/svg instead of an actual button node.
+    // Restrict this path to role=dialog/alertdialog as the old build did.
+    const legacy = [...document.querySelectorAll('[role="dialog"] [aria-label], [role="alertdialog"] [aria-label]')]
+      .find(e => re.test(nhanNut(e)) && !!e.closest('[role="dialog"], [role="alertdialog"]'));
+    if (legacy) return legacy;
+    // Only if the known-good DOM path is absent, accept alternative call cards
+    // with BOTH explicit incoming-call wording and a decline control.
     return [...document.querySelectorAll('button[aria-label], [role="button"][aria-label]')]
       .find(e => re.test(nhanNut(e)) && !!hopGoiTuNut(e)) || null;
   };
