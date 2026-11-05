@@ -13,6 +13,7 @@ on:
       - feature/notification-clean-preview
       - feature/notification-preview-native-filter
       - feature/notification-emoji-preview
+      - feature/notification-all-window-states
   workflow_dispatch:
 
 concurrency:
@@ -33,6 +34,8 @@ jobs:
           /tmp/mn-notification-deeplink-tests
           swiftc "Ma nguon/NotificationPreviewFormatter.swift" "Tests/NotificationPreviewFormatterTests.swift" -o /tmp/mn-preview-formatter-tests
           /tmp/mn-preview-formatter-tests
+          swiftc "Ma nguon/NotificationDeduplicator.swift" "Tests/NotificationDeduplicatorTests.swift" -o /tmp/mn-notification-dedup-tests
+          /tmp/mn-notification-dedup-tests
       - name: WebView JavaScript regression
         run: |
           node Tests/ReelPreviewTests.cjs
