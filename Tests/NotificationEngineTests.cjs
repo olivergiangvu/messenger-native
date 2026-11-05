@@ -228,6 +228,27 @@ assert.equal(received().at(-1).noiDung, 'Tin mới đến thật sự');
 assert.equal(window.__mnNotificationStatus().draftSkipped, 4);
 assert.equal(window.__mnNotificationStatus().sent, 16);
 
+// Sending exactly the draft text may leave a plain sidebar preview without
+// the explicit "You:" marker. Do not mistake that local send for an inbound.
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Draft: nội dung chuẩn bị gửi', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 16);
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'nội dung chuẩn bị gửi', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 16, 'Submitted local draft must not notify');
+assert.equal(window.__mnNotificationStatus().lastEvent, 'draft-send-suppressed');
+
+// Incoming messages that differ from the submitted draft must still notify.
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Người kia vừa phản hồi', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, 17, 'Actual inbound after local draft send must notify');
+assert.equal(received().at(-1).noiDung, 'Người kia vừa phản hồi');
+assert.equal(window.__mnNotificationStatus().draftSkipped, 6);
+assert.equal(window.__mnNotificationStatus().sent, 17);
+
 // Presentation must also be enabled on macOS when the application is active.
 const nativeApp = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'main.swift'), 'utf8');
 assert.match(nativeApp, /xong\(\[\.banner, \.sound, \.list\]\)/,
