@@ -565,6 +565,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSLog("MN NOTI ERROR: missing notification-engine.js")
         }
 
+        // Lightweight helper function only. No renderer scans until the user
+        // explicitly opens View > Memory Diagnostics.
+        if let memURL = Bundle.main.url(forResource: "memory-diagnostics", withExtension: "js"),
+           let memScript = try? String(contentsOf: memURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: memScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        } else {
+            NSLog("MN MEMORY: diagnostic helper missing from bundle")
+        }
+
         if let navURL = Bundle.main.url(forResource: "notification-navigation", withExtension: "js"),
            let navScript = try? String(contentsOf: navURL, encoding: .utf8) {
             cauHinh.userContentController.addUserScript(
@@ -1557,6 +1567,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         nativeNotifications.sendTest()
     }
 
+    @objc func chanDoanBoNho() {
+        // On demand only. No polling or retained web page data.
+        let script = "JSON.stringify(window.__mnRendererStatus ? window.__mnRendererStatus() : {installed:false})"
+        webView.evaluateJavaScript(script) { value, error in
+            let alert = NSAlert()
+            alert.messageText = MenuLocalization.text("Memory Diagnostics…")
+            let snapshot = (value as? String) ?? "Unavailable: \(error?.localizedDescription ?? "unknown")"
+            alert.informativeText = """
+            Messenger Native PID: \(getpid())
+
+            Renderer snapshot (counts only):
+            \(snapshot)
+
+            These DOM, media and resource counters are not the WebKit
+            process's physical memory. The decoded-pixel proxy is not
+            allocated RAM and can overcount reused image resources.
+
+            For physical memory, use:
+            bash scripts/profile-memory.sh --helper <WebContent PID>
+            and Web Inspector > Timelines > Memory.
+            """
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
     @objc func chanDoanThongBao() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             DispatchQueue.main.async {
@@ -1731,6 +1768,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             muc("Công cụ soi trang (DevTools)", #selector(moDevTools), "i", self, [.command, .option]),
             muc("Reel Diagnostics…", #selector(chanDoanReel), "", self),
             .separator(),
+            muc("Memory Diagnostics…", #selector(chanDoanBoNho), "", self),
             muc("Notification Diagnostics…", #selector(chanDoanThongBao), "", self),
             muc("Request Notification Permission…", #selector(xinQuyenThongBaoTuMenu), "", self),
             muc("Send Test Notification…", #selector(thuThongBaoNative), "", self),
