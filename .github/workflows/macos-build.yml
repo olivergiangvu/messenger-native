@@ -20,6 +20,7 @@ on:
       - feature/notification-center-history
       - feature/reels-default-browser
       - feature/notification-relative-time-fix
+      - feature/memory-baseline-adaptive-polling
   workflow_dispatch:
 
 concurrency:
@@ -52,6 +53,7 @@ jobs:
           node Tests/NotificationNavigationTests.cjs
           node Tests/IncomingCallAudioTests.cjs
           node Tests/CallRecoveryPerformanceTests.cjs
+          node Tests/MemoryDiagnosticsTests.cjs
           node Tests/MenuLocalizationTests.cjs
           node Tests/InterfaceLocalizationTests.cjs
       - name: Validate macOS localization resources
@@ -67,12 +69,19 @@ jobs:
         run: |
           bash -n install-local.sh
           bash -n scripts/profile-memory.sh
+          bash -n scripts/profile-memory-series.sh
+          bash -n scripts/publish-installed-rollback.sh
+          bash -n scripts/restore-rollback.sh
+          bash scripts/restore-rollback.sh --help
+          bash scripts/publish-installed-rollback.sh --help
+          bash scripts/profile-memory-series.sh --help
       - name: Build unsigned test application (ad hoc)
         env:
           KY_APP: "-"
         run: |
           bash build.sh "$RUNNER_TEMP/messenger-native-ci"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-engine.js"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/memory-diagnostics.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-navigation.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/reel-preview.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/incoming-call-audio.js"
