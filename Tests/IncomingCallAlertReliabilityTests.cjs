@@ -49,7 +49,7 @@ buttons.push(legacySpan, legacyOther);
 assert.equal(context.find('Chấp nhận'), legacySpan,
   'restore original role=dialog [aria-label] path for non-button elements');
 assert.equal(context.find('Từ chối'), legacyOther);
-
+buttons.length = 0;
 
 const callControls = [];
 const callCard = container('Someone is calling you', callControls);
