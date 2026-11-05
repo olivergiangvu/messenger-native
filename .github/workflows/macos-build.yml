@@ -12,6 +12,7 @@ on:
       - feature/notification-deeplink
       - feature/notification-clean-preview
       - feature/notification-preview-native-filter
+      - feature/notification-emoji-preview
   workflow_dispatch:
 
 concurrency:

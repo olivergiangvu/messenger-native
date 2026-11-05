@@ -107,3 +107,5 @@
 "Chưa thể cấp quyền thông báo" = "Chưa thể cấp quyền thông báo";
 "Đã cấp quyền thông báo" = "Đã cấp quyền thông báo";
 "Tắt chuông ngay" = "Tắt chuông ngay";
+"Thông báo tin nhắn mới" = "Thông báo tin nhắn mới";
+"Thông báo khi có tin nhắn mới dù cửa sổ đang được chọn, hiện trên màn hình, chạy nền hoặc thu nhỏ. Dùng quan sát thay đổi và quét dự phòng 3,5 giây. Chỉ hoạt động khi app còn chạy; có thể bỏ sót nếu WebKit bị đình chỉ. Chế độ Tập trung và thiết lập Thông báo của macOS vẫn được áp dụng." = "Thông báo khi có tin nhắn mới dù cửa sổ đang được chọn, hiện trên màn hình, chạy nền hoặc thu nhỏ. Dùng quan sát thay đổi và quét dự phòng 3,5 giây. Chỉ hoạt động khi app còn chạy; có thể bỏ sót nếu WebKit bị đình chỉ. Chế độ Tập trung và thiết lập Thông báo của macOS vẫn được áp dụng.";

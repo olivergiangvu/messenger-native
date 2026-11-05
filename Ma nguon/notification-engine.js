@@ -3,9 +3,10 @@
  * Best-effort DOM fallback when messenger.com does not call Notifications API
  * in WKWebView. No Web Push promise: background JS may still be suspended.
  *
- * Unlike the original timer, this engine ALWAYS tracks a snapshot while the
- * window is focused; it never marks a changed row as notified before deciding
- * whether to deliver. No first-blur or 15-second discard.
+ * Detection is independent of foreground/background/focus state. The
+ * macOS Notification Center decides whether a banner/sound is presented.
+ * The initial snapshot remains silent; unread changes alone are not new
+ * messages. Open conversations can show incoming previews as read immediately.
  */
 (() => {
   if (window.__mnNotificationEngine) return;
@@ -27,10 +28,117 @@
   let scans = 0;
   let sent = 0;
   let seq = 0;
+  let foregroundSent = 0;
+  let selectedChatSent = 0;
+  let selfMessageSkipped = 0;
+  let draftSkipped = 0;
+  let localSendSkipped = 0;
+  const recentLocalText = new Map();
+  const LOCAL_TEXT_TTL_MS = 12000;
+  const MAX_LOCAL_TEXTS = 8;
 
   const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   const metadata = (text) => /^(?:\d+\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|s|m|h|d|w)\s*(?:trước|ago)?|just now|vừa xong|active now|đang hoạt động|·)$/i.test(text);
   const isForeground = () => !document.hidden && document.hasFocus();
+  const normalizedPath = path => String(path || '').replace(/\/+$/, '');
+  const currentlySelected = path =>
+    normalizedPath(path) === normalizedPath(location.pathname);
+
+  // Common first-person prefixes used by Messenger's conversation preview
+  // for an outgoing message. This is a conservative UI hint, not a trusted
+  // server-side sender identity. A message lacking an explicit marker cannot
+  // be reliably classified from the conversation list alone.
+  const ownPreview = /^(?:you|bạn)\s*[:：·]|^(?:you\s+(?:sent|reacted|replied)|bạn\s+(?:đã gửi|đã bày tỏ|đã trả lời))\b/i;
+  const looksSelfAuthored = preview => ownPreview.test(normalize(preview));
+  // Messenger replaces its conversation-list preview with an unsent local
+  // composer draft ("Draft: …", "Bản nháp: …"). This is a UI-state
+  // change, NOT a new incoming message. Check the prefix before parsing
+  // group sender labels; otherwise a group can mistakenly become "Draft".
+  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)\s*[:：]\s*/i;
+  const isDraftPreview = preview => draftPrefix.test(normalize(preview));
+
+  // A selected conversation can be marked READ immediately. Its sidebar
+  // preview then changes for BOTH inbound and self-authored messages. Labels
+  // such as "You:" are not always present, so record a short-lived in-memory
+  // fingerprint of text the user actually typed in the chat composer.
+  // Never send composer text to Swift, logs, preferences or a network API.
+  function composerFor(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+    const editor = target.closest('[contenteditable="true"], textarea');
+    if (!editor) return null;
+    const label = normalize((editor.getAttribute && (
+      editor.getAttribute('aria-label') || editor.getAttribute('placeholder')
+    )) || '').toLowerCase();
+    if (/search|tìm kiếm|tìm trên/.test(label)) return null;
+    if (!/^\/t\/[^/]+/.test(location.pathname)) return null;
+    return editor;
+  }
+
+  function composerText(editor) {
+    return normalize((editor && (editor.innerText || editor.value ||
+      editor.textContent)) || '').slice(0, 500);
+  }
+
+  function rememberLocalText(editor, sendIntent) {
+    const text = composerText(editor);
+    if (!text || isDraftPreview(text)) return;
+    const path = normalizedPath(location.pathname);
+    const previous = recentLocalText.get(path);
+    const timestamp = Date.now();
+    // A send action refreshes the same candidate; regular input overwrites it.
+    recentLocalText.delete(path);
+    recentLocalText.set(path, {
+      text, timestamp, sendIntent: !!sendIntent || !!(
+        previous && previous.text === text && previous.sendIntent
+      ), consumed: false
+    });
+    while (recentLocalText.size > MAX_LOCAL_TEXTS) {
+      recentLocalText.delete(recentLocalText.keys().next().value);
+    }
+  }
+
+  function recentLocalMatch(item) {
+    const candidate = recentLocalText.get(normalizedPath(item.path));
+    if (!candidate || candidate.consumed ||
+        Date.now() - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
+    const visible = normalize(item.preview);
+    const actual = candidate.text;
+    // Messenger sometimes prepends sender status without its "You:" label;
+    // the check is exact, or a sufficiently long visibly truncated prefix.
+    const matched = visible === actual ||
+      (visible.endsWith('…') && visible.length >= 16 &&
+       actual.startsWith(visible.slice(0, -1)));
+    if (matched) candidate.consumed = true;
+    return matched;
+  }
+
+  document.addEventListener('input', event => {
+    const editor = composerFor(event.target);
+    if (editor) rememberLocalText(editor, false);
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing ||
+        event.ctrlKey || event.metaKey || event.altKey) return;
+    const editor = composerFor(event.target);
+    if (editor) rememberLocalText(editor, true);
+  }, true);
+
+  // Send-button taps can blur the composer before click handlers run. Keep
+  // the candidate captured by prior input even when the button has no label.
+  document.addEventListener('pointerdown', event => {
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const button = target.closest('button, [role="button"]');
+    if (!button || typeof button.getAttribute !== 'function') return;
+    const label = normalize([
+      button.getAttribute('aria-label'), button.getAttribute('title'),
+      button.getAttribute('data-testid')
+    ].filter(Boolean).join(' ')).toLowerCase();
+    if (!/^(send|gửi)(?:\s|$)/.test(label)) return;
+    const editor = composerFor(document.activeElement);
+    if (editor) rememberLocalText(editor, true);
+  }, true);
 
   // Messenger can put an accessibility/status label such as "Unread message"
   // inside the conversation anchor's rendered text. It is a UI marker, not
@@ -137,6 +245,7 @@
     const title = parts[0].slice(0, 110) || 'Messenger';
     let preview = normalize(parts.slice(1).join(' ')).slice(0, 500);
     if (!preview) preview = 'Tin nhắn mới';
+    const isDraft = isDraftPreview(preview);
 
     // A sender prefix is reliably extracted only when Messenger shows it.
     // Never claim that the sender was determined when it wasn't visible.
@@ -144,7 +253,7 @@
     const groupLike = row.querySelectorAll('img').length >= 2 ||
                       !!row.querySelector('[aria-label*="group"], [aria-label*="nhóm"]');
     const match = preview.match(/^([^:]{1,75}):\s*(.{1,500})$/);
-    if (groupLike && match && !/^(you|bạn)$/i.test(match[1].trim())) {
+    if (groupLike && match && !/^(you|bạn|draft|bản nháp|nháp)$/i.test(match[1].trim())) {
       sender = normalize(match[1]);
       preview = normalize(match[2]);
     }
@@ -155,7 +264,10 @@
       preview,
       unread: unread(row),
       index,
-      signature: preview + '\u001f' + sender
+      signature: preview + '\u001f' + sender,
+      selfAuthored: looksSelfAuthored(preview),
+      isDraft,
+      draftContent: isDraft ? normalize(preview.replace(draftPrefix, '')) : ''
     };
   }
 
@@ -191,6 +303,8 @@
           nguon: 'dom'
         });
         sent += 1;
+        if (item.foreground) foregroundSent += 1;
+        if (item.selectedChat) selectedChatSent += 1;
         lastEvent = 'sent-dom-notification';
       }
       if (pending.length) setTimeout(tick, 90);
@@ -221,13 +335,45 @@
     let changes = 0;
     for (const item of current) {
       const old = conversations.get(item.path);
-      const changed = !old || old.signature !== item.signature || (!old.unread && item.unread);
-      // A previously unseen row at the top is eligible; old rows exposed by
-      // scrolling or list virtualization further down are not treated as new.
-      const eligible = old ? changed : item.index < 6;
-      if (!foreground && item.unread && eligible && changed) {
-        changes += 1;
-        enqueue(item);
+      // An unread badge changing by itself (e.g. "Mark as unread") is NOT
+      // proof that a new message arrived. Only a changed preview is eligible.
+      const previewChanged = !!old && old.signature !== item.signature;
+      const freshTopUnread = !old && item.index < 6 && item.unread;
+      const selected = currentlySelected(item.path);
+      // A currently opened chat is marked read as soon as the new message
+      // renders, even if the app is foregrounded or merely visible. Its
+      // preview can still prove that the conversation changed.
+      const activeIncoming = selected && previewChanged;
+      // When the user's typed draft becomes the same sent-message preview,
+      // the sidebar may omit the usual "You:" marker. Match exact local
+      // draft content, rather than suppressing arbitrary read messages.
+      const submittedLocalDraft = !!old && old.isDraft && !item.isDraft &&
+        selected && !item.unread && !!old.draftContent &&
+        normalize(item.preview) === old.draftContent;
+      // Real local user input is a stronger signal than Messenger's optional
+      // "You:" prefix and works when Draft: transitions are not observed.
+      const eligible = previewChanged || freshTopUnread;
+      // Do not consume a local-send fingerprint during a no-change scan.
+      const sentFromLocalComposer = eligible && !item.isDraft &&
+        !submittedLocalDraft && selected && recentLocalMatch(item);
+      if (eligible && (item.unread || activeIncoming)) {
+        if (item.isDraft) {
+          // The visible preview changed because the user typed into the
+          // composer; it does not represent an inbound server message.
+          draftSkipped += 1;
+          lastEvent = 'draft-change-suppressed';
+        } else if (submittedLocalDraft) {
+          draftSkipped += 1;
+          lastEvent = 'draft-send-suppressed';
+        } else if (sentFromLocalComposer) {
+          localSendSkipped += 1;
+          lastEvent = 'local-send-suppressed';
+        } else if (item.selfAuthored) {
+          selfMessageSkipped += 1;
+        } else {
+          changes += 1;
+          enqueue({ ...item, foreground, selectedChat: selected });
+        }
       }
       conversations.delete(item.path);
       conversations.set(item.path, { ...item, lastSeen: now });
@@ -279,8 +425,10 @@
   }
 
   window.__mnNotificationStatus = () => ({
-    version: '1.0',
+    version: '1.1-all-window-states',
     initialized, scans, sent, pending: pending.length,
+    foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
+    localSendSkipped,
     trackedConversations: conversations.size,
     observerAttached: !!observer, lastEvent
   });
