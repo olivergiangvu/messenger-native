@@ -11,8 +11,11 @@ assert.ok(start >= 0 && end > start, 'Expected call selector helper inside embed
 const code = swift.slice(start, end).replace(/\\\\/g, '\\'); // Swift string -> JavaScript backslash
 const buttons = [];
 const context = { document: { querySelectorAll(selector) {
+  if (selector === '[role="dialog"] [aria-label], [role="alertdialog"] [aria-label]') {
+    return buttons.filter(b => !!b.closest('[role="dialog"], [role="alertdialog"]'));
+  }
   assert.equal(selector, 'button[aria-label], [role="button"][aria-label]');
-  return buttons;
+  return buttons.filter(b => b.tagName === 'BUTTON');
 } } };
 vm.runInNewContext([code,
   'globalThis.find = label => nutGoiDen(label);',
@@ -21,6 +24,7 @@ vm.runInNewContext([code,
 
 function button(label, card, roleDialog = null) {
   return {
+    tagName: 'BUTTON',
     getAttribute(name) { return name === 'aria-label' ? label : null; },
     closest() { return roleDialog; },
     parentElement: card
@@ -36,6 +40,16 @@ buttons.push(enAnswer, vnDecline);
 assert.equal(context.find('Chấp nhận'), enAnswer, 'alternate Answer label in dialog');
 assert.equal(context.find('Từ chối'), vnDecline);
 buttons.length = 0;
+// Regression: the known-good detector accepted a nested aria-labelled
+// SPAN in the call dialog. The PR #20 fallback initially restricted this to
+// actual <button> elements, which broke the older working DOM shape.
+const legacySpan = { ...button('Chấp nhận', null, roleDialog), tagName: 'SPAN' };
+const legacyOther = { ...button('Từ chối', null, roleDialog), tagName: 'SPAN' };
+buttons.push(legacySpan, legacyOther);
+assert.equal(context.find('Chấp nhận'), legacySpan,
+  'restore original role=dialog [aria-label] path for non-button elements');
+assert.equal(context.find('Từ chối'), legacyOther);
+
 
 const callControls = [];
 const callCard = container('Someone is calling you', callControls);
