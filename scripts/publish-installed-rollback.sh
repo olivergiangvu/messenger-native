@@ -115,7 +115,12 @@ experiment (PR #18 / PR #19). The existing signed .app bundle was zipped as-is:
 - **Source caveat:** the installed binary has no verified embedded Git SHA, so
   this source reference is a historical checkpoint, NOT proven binary provenance.
 
-### Known issue\nThe user reported an incoming call missing its expected alert on 2026-11-05\naround 18:51 local time. This archive is NOT a verified fully stable release;\nit only preserves the exact pre-experiment app for emergency rollback.\n\n### Manual rollback on the Mac
+### Known issue
+The user reported an incoming call missing its expected alert on 2026-11-05
+around 18:51 local time. This archive is NOT a verified fully stable release;
+it only preserves the exact pre-experiment app for emergency rollback.
+
+### Manual rollback on the Mac
 Download the ZIP and companion .sha256 file from this release; verify the ZIP
 checksum, extract the app and install it through the repository's
 \`install-local.sh\` script. Or use \`scripts/restore-rollback.sh <zip-path>\`
