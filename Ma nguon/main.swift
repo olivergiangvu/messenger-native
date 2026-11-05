@@ -473,10 +473,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         taoMenu()
         // Đang gọi mà anh chuyển sang app khác → thu cửa sổ cuộc gọi thành PiP
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.nativeNotifications.didResignActive()
             self?.tuDongPiP()
             self?.capNhatBangGoi()
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.nativeNotifications.didBecomeActive()
             self?.capNhatBangGoi()
         }
         if ["2", "3"].contains(ProcessInfo.processInfo.environment["VM_PIP"] ?? "") { DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.thuPiP2() } }
