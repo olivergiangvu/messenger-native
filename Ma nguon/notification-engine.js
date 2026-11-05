@@ -37,6 +37,8 @@
   let dockBadgeState = 'initializing';
   let dockRowsVisible = 0;
   let dockBadgeUpdates = 0;
+  let unknownRowsBaselined = 0;
+  let staleCandidatesBlocked = 0;
   const recentLocalText = new Map();
   const LOCAL_TEXT_TTL_MS = 12000;
   const MAX_LOCAL_TEXTS = 8;
@@ -374,7 +376,11 @@
       // An unread badge changing by itself (e.g. "Mark as unread") is NOT
       // proof that a new message arrived. Only a changed preview is eligible.
       const previewChanged = !!old && old.signature !== item.signature;
-      const freshTopUnread = !old && item.index < 6 && item.unread;
+      // A row appearing at the top is NOT proof that a new message arrived:
+      // Messenger may reorder, virtualize or restore old unread conversations.
+      // Previously we treated every unseen top-six unread row as fresh,
+      // causing backlog notifications when opening an existing chat.
+      if (!old) unknownRowsBaselined += 1;
       const selected = currentlySelected(item.path);
       // A currently opened chat is marked read as soon as the new message
       // renders, even if the app is foregrounded or merely visible. Its
@@ -388,7 +394,8 @@
         normalize(item.preview) === old.draftContent;
       // Real local user input is a stronger signal than Messenger's optional
       // "You:" prefix and works when Draft: transitions are not observed.
-      const eligible = previewChanged || freshTopUnread;
+      const eligible = previewChanged;
+      if (!old && item.unread) staleCandidatesBlocked += 1;
       // Do not consume a local-send fingerprint during a no-change scan.
       const sentFromLocalComposer = eligible && !item.isDraft &&
         !submittedLocalDraft && selected && recentLocalMatch(item);
@@ -466,6 +473,7 @@
     foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
     localSendSkipped,
     dockBadgeState, dockBadgeCount, dockRowsVisible, dockBadgeUpdates,
+    unknownRowsBaselined, staleCandidatesBlocked,
     trackedConversations: conversations.size,
     observerAttached: !!observer, lastEvent
   });
