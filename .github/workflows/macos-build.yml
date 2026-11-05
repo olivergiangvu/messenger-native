@@ -44,6 +44,8 @@ jobs:
           /tmp/mn-notification-dedup-tests
           swiftc "Ma nguon/NotificationDisplayPolicy.swift" "Tests/NotificationDisplayPolicyTests.swift" -o /tmp/mn-notification-display-tests
           /tmp/mn-notification-display-tests
+          swiftc "Ma nguon/IncomingCallAlertGate.swift" "Tests/IncomingCallAlertGateTests.swift" -o /tmp/mn-call-alert-gate-tests
+          /tmp/mn-call-alert-gate-tests
       - name: WebView JavaScript regression
         run: |
           node Tests/ReelPreviewTests.cjs
@@ -52,6 +54,7 @@ jobs:
           node Tests/NotificationNavigationTests.cjs
           node Tests/IncomingCallAudioTests.cjs
           node Tests/IncomingCallAlertReliabilityTests.cjs
+          node Tests/IncomingCallWebHintTests.cjs
           node Tests/MenuLocalizationTests.cjs
           node Tests/InterfaceLocalizationTests.cjs
       - name: Validate macOS localization resources
