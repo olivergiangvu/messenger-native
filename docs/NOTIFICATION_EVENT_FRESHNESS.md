@@ -66,7 +66,11 @@ of separate cards. Different chat paths remain isolated.
   was submitted within the previous 90 seconds. Otherwise its original
   behavior remains intact; do not drop all generic events globally.
 - Privacy-safe coordinator counters: `DOM submitted`,
-  `Web submitted`, `Thread cards replaced`, `Generic suppressed`.
+  `Web submitted`, `Thread cards replaced`, `Generic suppressed`,
+  `Web no-thread received` and `Web no-thread submitted`. These last
+  two distinguish Web Notification API events which contain no validated
+  `/t/<id>` route and therefore cannot be safely merged into a specific
+  conversation without guessing the chat identity.
 
 References:
 - Apple's UNNotificationRequest(identifier:content:trigger:) documentation
@@ -93,7 +97,8 @@ References:
 8. Confirm sending your own messages or typing drafts stays silent.
 9. If duplicates continue, check `View → Notification Diagnostics…`
    and report **DOM submitted / Web submitted / Thread cards replaced /
-   Generic suppressed**, plus the `unknownRowsBaselined` counter.
+   Generic suppressed / Web no-thread received / Web no-thread submitted**,
+   plus the `unknownRowsBaselined` counter.
    None of these counters contain names or message text.
 
 ## Branch
