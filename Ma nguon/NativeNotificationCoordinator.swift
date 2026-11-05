@@ -9,6 +9,7 @@ final class NativeNotificationCoordinator {
     private(set) var sameSourceDuplicates = 0
     private(set) var crossSourceDuplicates = 0
     private(set) var focusReplays = 0
+    private(set) var lastPreviewRepeats = 0
 
     func didResignActive() {
         deduplicator.didResignActive()
@@ -88,6 +89,11 @@ final class NativeNotificationCoordinator {
                 focusReplays += 1
                 NSLog("MN NOTI: old background notification replayed on focus; suppressed")
                 return
+            case .duplicateLastPreview:
+                suppressed += 1
+                lastPreviewRepeats += 1
+                NSLog("MN NOTI: same last chat preview redisplayed; suppressed")
+                return
             }
         }
 
@@ -130,6 +136,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
     }
 }
