@@ -52,6 +52,7 @@ jobs:
           node Tests/NotificationNavigationTests.cjs
           node Tests/IncomingCallAudioTests.cjs
           node Tests/CallRecoveryPerformanceTests.cjs
+          node Tests/MemoryDiagnosticsTests.cjs
           node Tests/MenuLocalizationTests.cjs
           node Tests/InterfaceLocalizationTests.cjs
       - name: Validate macOS localization resources
@@ -73,6 +74,7 @@ jobs:
         run: |
           bash build.sh "$RUNNER_TEMP/messenger-native-ci"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-engine.js"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/memory-diagnostics.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-navigation.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/reel-preview.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/incoming-call-audio.js"
