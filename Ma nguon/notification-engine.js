@@ -352,8 +352,10 @@
         normalize(item.preview) === old.draftContent;
       // Real local user input is a stronger signal than Messenger's optional
       // "You:" prefix and works when Draft: transitions are not observed.
-      const sentFromLocalComposer = selected && recentLocalMatch(item);
       const eligible = previewChanged || freshTopUnread;
+      // Do not consume a local-send fingerprint during a no-change scan.
+      const sentFromLocalComposer = eligible && !item.isDraft &&
+        !submittedLocalDraft && selected && recentLocalMatch(item);
       if (eligible && (item.unread || activeIncoming)) {
         if (item.isDraft) {
           // The visible preview changed because the user typed into the
