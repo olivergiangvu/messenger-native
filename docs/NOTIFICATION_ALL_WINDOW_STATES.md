@@ -37,6 +37,19 @@ there is no access to Meta's authoritative server event stream.
   messages unless there is a known previous preview.
 - An explicitly outgoing first-person preview (e.g. `You:`, `Bạn:`,
   `You sent` or `Bạn đã gửi`) is ignored, including in the open chat.
+- **Self-sent messages typed in Messenger Native:** a short-lived (12 seconds),
+  in-memory reference to the text entered in the current conversation
+  composer is compared against the updated sidebar preview. Enter or a
+  Send-button action refreshes the reference. A match is excluded even if
+  Messenger omits a `You:` prefix and no intermediate `Draft:` preview
+  was observed. This resolves the user's next field report: Draft banners
+  were removed, but own messages still generated notifications.
+  The composer text is **never** sent to Swift, logged, persisted, or
+  exposed by `window.__mnNotificationStatus()`. Matches are consumed once
+  to avoid suppressing a subsequent identical inbound message.
+- Changes to the conversation preview **without a matching local outgoing
+  candidate** remain eligible as incoming, including while the user is
+  typing (for example, when another person sends a message immediately).
 - An **unsent local composer draft** is not a new message. Ignore
   conversation-list previews beginning with `Draft:`, `Bản nháp:` or
   `Nháp:` even if the focused conversation's preview changes every
@@ -52,6 +65,9 @@ there is no access to Meta's authoritative server event stream.
 
 **Limitation:** Messenger Web may not label all outgoing messages
 consistently, and repeated identical preview strings may look unchanged.
+Messages sent on another device and reflected into this WKWebView have no
+local composer fingerprint; distinguishing those from incoming messages
+requires a reliable sender ID or message-side semantics from Meta.
 A genuine incoming message that literally begins with `Draft:` may look
 identical to Messenger's local draft marker in text-only DOM previews,
 so exact sender classification is not guaranteed without Meta's event feed.
@@ -86,6 +102,7 @@ are bundled. No separate language switch is introduced.
 - `selectedChatSent`: notifications from the currently selected chat
 - `selfMessageSkipped`: outgoing-preview candidates suppressed
 - `draftSkipped`: local draft edits and exact draft-to-sent transitions suppressed
+- `localSendSkipped`: self-sent composer previews skipped before native delivery
 
 These are counters only; no chat IDs, contact names or message text are
 logged or returned.
@@ -114,6 +131,10 @@ logged or returned.
    Sending that exact draft also must not notify the sender.
 8. Receive a genuine new message after the draft and confirm it still
    notifies.
+   Also test sending a short message **quickly** with Enter and with the
+   Send button so Messenger does not have time to display a `Draft:`
+   preview; neither self-send should notify. Have the other person reply
+   immediately after each send and confirm the reply still notifies.
 9. Verify notification sound is not doubled on foreground delivery.
 10. Confirm Unicode emoji in preview and clean `Unread message` labels.
 11. Test macOS Focus on/off: Focus policy may deliberately mute/hide
