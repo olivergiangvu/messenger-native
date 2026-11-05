@@ -15,6 +15,7 @@ on:
       - feature/notification-emoji-preview
       - feature/notification-all-window-states
       - feature/notification-focus-dedup
+      - feature/dock-unread-accuracy
   workflow_dispatch:
 
 concurrency:
@@ -37,6 +38,8 @@ jobs:
           /tmp/mn-preview-formatter-tests
           swiftc "Ma nguon/NotificationDeduplicator.swift" "Tests/NotificationDeduplicatorTests.swift" -o /tmp/mn-notification-dedup-tests
           /tmp/mn-notification-dedup-tests
+          swiftc "Ma nguon/NotificationDisplayPolicy.swift" "Tests/NotificationDisplayPolicyTests.swift" -o /tmp/mn-notification-display-tests
+          /tmp/mn-notification-display-tests
       - name: WebView JavaScript regression
         run: |
           node Tests/ReelPreviewTests.cjs
