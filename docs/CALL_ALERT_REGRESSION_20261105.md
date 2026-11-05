@@ -25,3 +25,36 @@ On the Mac before memory-optimization PRs #18/#19 were installed, a Messenger co
 **Release caution:** the pre-PR18 installed app is *not* a verified stable rollback for incoming calls until these checks pass. If archived in GitHub, label it `pre-fix backup (known issue: missed incoming call)`, not a stable feature-complete release.
 
 **Branch:** fix/incoming-call-alert-reliability; based on PR #17, independent of PR #18/#19.
+
+## Nov 5 — follow-up after the first candidate still failed on the Mac
+
+The user reports **the newly installed call-fallback build STILL did not show incoming-call notifications**. The first fallback design had a concrete logic flaw:
+
+1. `IncomingCallRinger.stop()` set `needsNewSessionAfterStop=true`; a ringtone signal from a later call could be rejected indefinitely if a matching call dialog did not appear.
+2. PR #20's first iteration only scheduled fallback when `sessionsStarted` increased, so the blocked ringtone also blocked the **notification**.
+3. Even when a normal call dialog was recognized, the old logic deliberately cancelled the fallback and only showed a floating panel in background, without delivering a macOS call card. In foreground, it relied on Messenger's own dialog.
+
+### Updated behavior (same draft PR #20)
+
+- Incoming-call notification gate is independent of the AppKit ringtone state.
+- A *confirmed* incoming dialog triggers a one-per-session native macOS call notification (foreground **and** background). Any pending generic fallback is cancelled.
+- A known incoming ringtone starts a one-shot fallback notification after 1.5 s if no dialog was reported; sound playback is not a prerequisite. New audio elements have stable opaque tokens to re-arm the ringer.
+- Explicit live incoming Web Notification hints are a third path. A message about a **missed** call is **not** a live-call signal.
+- Call Diagnostics now reports signal counts and native notification requests/errors to distinguish upstream WebKit events vs downstream notification failures.
+- No new app build is marked as a release before a real incoming call test verifies foreground, background, audio/video and hangup behavior.
+
+### Trial instructions (after CI green)
+
+```bash
+cd ~/messenger-native
+git fetch origin
+git switch fix/incoming-call-alert-reliability
+git pull --ff-only
+bash build.sh && bash install-local.sh
+```
+
+Test using a call from a second account/device. Open `View -> Call Diagnostics...` right after the test and check `Audio signals`, `Web notification call hints`, `Call dialogs observed`, `Native call notifications requested`, and `Native notification errors`.
+
+**If all three incoming-call signal counters stay zero while a call appears as missed in Messenger**, the live call is not being surfaced through any of the supported signals in this WKWebView instance. This build cannot manufacture a reliable VoIP incoming call notification without a supported upstream real-time signal. Stop adding speculative timers or fake push mechanisms and investigate Messenger Web feature support, account state and upstream signaling.
+
+No Pre-release/tag/rollback release has been created by these changes.
