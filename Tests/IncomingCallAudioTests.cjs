@@ -63,8 +63,9 @@ function harness(pathname, mediaSession = null) {
   assert.equal(main.originalPlays, 2, 'Voice/video playback must remain untouched');
 
   const manual = main.window.__mnStopIncomingRingtone();
-  assert.equal(manual, 1, 'Emergency stop must target ringtone only');
+  assert.equal(manual, 2, 'Emergency stop must target both ringtone audio elements only');
   assert.equal(ringtone.paused, true);
+  assert.equal(anotherCallAudio.paused, true);
   assert.equal(voice.paused, false);
   assert.equal(video.paused, false);
 
