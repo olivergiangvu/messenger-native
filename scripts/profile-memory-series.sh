@@ -10,7 +10,10 @@ usage() {
 }
 
 valid_positive() {
-  case "$1" in ""|*[!0-9]*) return 1 ;; *) [ "$1" -gt 0 ] ;;
+  case "$1" in
+    ""|*[!0-9]*) return 1 ;;
+    *) [ "$1" -gt 0 ] ;;
+  esac
 }
 MAIN_PID=""
 HELPERS=""
