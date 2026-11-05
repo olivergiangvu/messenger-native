@@ -32,6 +32,10 @@
   let selectedChatSent = 0;
   let selfMessageSkipped = 0;
   let draftSkipped = 0;
+  let localSendSkipped = 0;
+  const recentLocalText = new Map();
+  const LOCAL_TEXT_TTL_MS = 12000;
+  const MAX_LOCAL_TEXTS = 8;
 
   const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   const metadata = (text) => /^(?:\d+\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|s|m|h|d|w)\s*(?:trước|ago)?|just now|vừa xong|active now|đang hoạt động|·)$/i.test(text);
@@ -52,6 +56,89 @@
   // group sender labels; otherwise a group can mistakenly become "Draft".
   const draftPrefix = /^(?:draft|bản\s+nháp|nháp)\s*[:：]\s*/i;
   const isDraftPreview = preview => draftPrefix.test(normalize(preview));
+
+  // A selected conversation can be marked READ immediately. Its sidebar
+  // preview then changes for BOTH inbound and self-authored messages. Labels
+  // such as "You:" are not always present, so record a short-lived in-memory
+  // fingerprint of text the user actually typed in the chat composer.
+  // Never send composer text to Swift, logs, preferences or a network API.
+  function composerFor(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+    const editor = target.closest('[contenteditable="true"], textarea');
+    if (!editor) return null;
+    const label = normalize((editor.getAttribute && (
+      editor.getAttribute('aria-label') || editor.getAttribute('placeholder')
+    )) || '').toLowerCase();
+    if (/search|tìm kiếm|tìm trên/.test(label)) return null;
+    if (!/^\/t\/[^/]+/.test(location.pathname)) return null;
+    return editor;
+  }
+
+  function composerText(editor) {
+    return normalize((editor && (editor.innerText || editor.value ||
+      editor.textContent)) || '').slice(0, 500);
+  }
+
+  function rememberLocalText(editor, sendIntent) {
+    const text = composerText(editor);
+    if (!text || isDraftPreview(text)) return;
+    const path = normalizedPath(location.pathname);
+    const previous = recentLocalText.get(path);
+    const timestamp = Date.now();
+    // A send action refreshes the same candidate; regular input overwrites it.
+    recentLocalText.delete(path);
+    recentLocalText.set(path, {
+      text, timestamp, sendIntent: !!sendIntent || !!(
+        previous && previous.text === text && previous.sendIntent
+      ), consumed: false
+    });
+    while (recentLocalText.size > MAX_LOCAL_TEXTS) {
+      recentLocalText.delete(recentLocalText.keys().next().value);
+    }
+  }
+
+  function recentLocalMatch(item) {
+    const candidate = recentLocalText.get(normalizedPath(item.path));
+    if (!candidate || candidate.consumed ||
+        Date.now() - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
+    const visible = normalize(item.preview);
+    const actual = candidate.text;
+    // Messenger sometimes prepends sender status without its "You:" label;
+    // the check is exact, or a sufficiently long visibly truncated prefix.
+    const matched = visible === actual ||
+      (visible.endsWith('…') && visible.length >= 16 &&
+       actual.startsWith(visible.slice(0, -1)));
+    if (matched) candidate.consumed = true;
+    return matched;
+  }
+
+  document.addEventListener('input', event => {
+    const editor = composerFor(event.target);
+    if (editor) rememberLocalText(editor, false);
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing ||
+        event.ctrlKey || event.metaKey || event.altKey) return;
+    const editor = composerFor(event.target);
+    if (editor) rememberLocalText(editor, true);
+  }, true);
+
+  // Send-button taps can blur the composer before click handlers run. Keep
+  // the candidate captured by prior input even when the button has no label.
+  document.addEventListener('pointerdown', event => {
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const button = target.closest('button, [role="button"]');
+    if (!button || typeof button.getAttribute !== 'function') return;
+    const label = normalize([
+      button.getAttribute('aria-label'), button.getAttribute('title'),
+      button.getAttribute('data-testid')
+    ].filter(Boolean).join(' ')).toLowerCase();
+    if (!/^(send|gửi)(?:\s|$)/.test(label)) return;
+    const editor = composerFor(document.activeElement);
+    if (editor) rememberLocalText(editor, true);
+  }, true);
 
   // Messenger can put an accessibility/status label such as "Unread message"
   // inside the conversation anchor's rendered text. It is a UI marker, not
@@ -263,6 +350,9 @@
       const submittedLocalDraft = !!old && old.isDraft && !item.isDraft &&
         selected && !item.unread && !!old.draftContent &&
         normalize(item.preview) === old.draftContent;
+      // Real local user input is a stronger signal than Messenger's optional
+      // "You:" prefix and works when Draft: transitions are not observed.
+      const sentFromLocalComposer = selected && recentLocalMatch(item);
       const eligible = previewChanged || freshTopUnread;
       if (eligible && (item.unread || activeIncoming)) {
         if (item.isDraft) {
@@ -273,6 +363,9 @@
         } else if (submittedLocalDraft) {
           draftSkipped += 1;
           lastEvent = 'draft-send-suppressed';
+        } else if (sentFromLocalComposer) {
+          localSendSkipped += 1;
+          lastEvent = 'local-send-suppressed';
         } else if (item.selfAuthored) {
           selfMessageSkipped += 1;
         } else {
@@ -333,6 +426,7 @@
     version: '1.1-all-window-states',
     initialized, scans, sent, pending: pending.length,
     foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
+    localSendSkipped,
     trackedConversations: conversations.size,
     observerAttached: !!observer, lastEvent
   });
