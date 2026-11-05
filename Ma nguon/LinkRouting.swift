@@ -48,6 +48,46 @@ enum LinkRouting {
         return URL(string: "https://www.facebook.com/reel/\(identifier)/")
     }
 
+    /// First-party Facebook video/Reel destinations supported for external
+    /// browser handoff. Opaque share links cannot be safely converted into
+    /// numeric Reel IDs, so preserve them instead of embedding a player.
+    static func externalFacebookVideoURL(_ input: URL) -> URL? {
+        var candidate = input
+        for _ in 0..<2 {
+            guard let host = candidate.host?.lowercased(),
+                  host == "l.facebook.com" || host == "l.messenger.com" else { break }
+            guard let raw = URLComponents(url: candidate, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "u" })?.value,
+                  let destination = URL(string: raw) else { return nil }
+            candidate = destination
+        }
+        guard let scheme = candidate.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = candidate.host?.lowercased() else { return nil }
+        if let reel = canonicalReel(candidate) { return reel }
+        if host == "fb.watch" {
+            return candidate.path.count > 3 ? candidate : nil
+        }
+        guard ["facebook.com", "www.facebook.com", "m.facebook.com",
+               "web.facebook.com"].contains(host) else { return nil }
+        let parts = candidate.path.split(separator: "/").map(String.init)
+        if parts.count >= 3, parts[0].lowercased() == "share",
+           ["r", "v"].contains(parts[1].lowercased()), parts[2].count >= 3 {
+            return candidate
+        }
+        if parts.count == 1, parts[0].lowercased() == "watch",
+           let query = URLComponents(url: candidate, resolvingAgainstBaseURL: false)?.queryItems,
+           query.contains(where: { $0.name == "v" && !($0.value ?? "").isEmpty }) {
+            return candidate
+        }
+        if let index = parts.firstIndex(where: { $0.lowercased() == "videos" }),
+           index + 1 < parts.count, !parts[index + 1].isEmpty,
+           parts[index + 1].utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) {
+            return candidate
+        }
+        return nil
+    }
+
     static func isReel(_ url: URL) -> Bool {
         canonicalReel(url) != nil
     }
