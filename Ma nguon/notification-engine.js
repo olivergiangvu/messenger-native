@@ -34,7 +34,7 @@
   let draftSkipped = 0;
   let localSendSkipped = 0;
   let dockBadgeCount = null;
-  let dockBadgeState = 'unknown';
+  let dockBadgeState = 'initializing';
   let dockRowsVisible = 0;
   let dockBadgeUpdates = 0;
   const recentLocalText = new Map();
