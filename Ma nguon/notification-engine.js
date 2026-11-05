@@ -31,6 +31,7 @@
   let foregroundSent = 0;
   let selectedChatSent = 0;
   let selfMessageSkipped = 0;
+  let draftSkipped = 0;
 
   const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   const metadata = (text) => /^(?:\d+\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|s|m|h|d|w)\s*(?:trước|ago)?|just now|vừa xong|active now|đang hoạt động|·)$/i.test(text);
@@ -45,6 +46,12 @@
   // be reliably classified from the conversation list alone.
   const ownPreview = /^(?:you|bạn)\s*[:：·]|^(?:you\s+(?:sent|reacted|replied)|bạn\s+(?:đã gửi|đã bày tỏ|đã trả lời))\b/i;
   const looksSelfAuthored = preview => ownPreview.test(normalize(preview));
+  // Messenger replaces its conversation-list preview with an unsent local
+  // composer draft ("Draft: …", "Bản nháp: …"). This is a UI-state
+  // change, NOT a new incoming message. Check the prefix before parsing
+  // group sender labels; otherwise a group can mistakenly become "Draft".
+  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)\s*[:：]\s*/i;
+  const isDraftPreview = preview => draftPrefix.test(normalize(preview));
 
   // Messenger can put an accessibility/status label such as "Unread message"
   // inside the conversation anchor's rendered text. It is a UI marker, not
@@ -151,6 +158,7 @@
     const title = parts[0].slice(0, 110) || 'Messenger';
     let preview = normalize(parts.slice(1).join(' ')).slice(0, 500);
     if (!preview) preview = 'Tin nhắn mới';
+    const isDraft = isDraftPreview(preview);
 
     // A sender prefix is reliably extracted only when Messenger shows it.
     // Never claim that the sender was determined when it wasn't visible.
@@ -158,7 +166,7 @@
     const groupLike = row.querySelectorAll('img').length >= 2 ||
                       !!row.querySelector('[aria-label*="group"], [aria-label*="nhóm"]');
     const match = preview.match(/^([^:]{1,75}):\s*(.{1,500})$/);
-    if (groupLike && match && !/^(you|bạn)$/i.test(match[1].trim())) {
+    if (groupLike && match && !/^(you|bạn|draft|bản nháp|nháp)$/i.test(match[1].trim())) {
       sender = normalize(match[1]);
       preview = normalize(match[2]);
     }
@@ -170,7 +178,8 @@
       unread: unread(row),
       index,
       signature: preview + '\u001f' + sender,
-      selfAuthored: looksSelfAuthored(preview)
+      selfAuthored: looksSelfAuthored(preview),
+      isDraft
     };
   }
 
@@ -249,7 +258,12 @@
       const activeIncoming = selected && previewChanged;
       const eligible = previewChanged || freshTopUnread;
       if (eligible && (item.unread || activeIncoming)) {
-        if (item.selfAuthored) {
+        if (item.isDraft) {
+          // The visible preview changed because the user typed into the
+          // composer; it does not represent an inbound server message.
+          draftSkipped += 1;
+          lastEvent = 'draft-change-suppressed';
+        } else if (item.selfAuthored) {
           selfMessageSkipped += 1;
         } else {
           changes += 1;
@@ -308,7 +322,7 @@
   window.__mnNotificationStatus = () => ({
     version: '1.1-all-window-states',
     initialized, scans, sent, pending: pending.length,
-    foregroundSent, selectedChatSent, selfMessageSkipped,
+    foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
     trackedConversations: conversations.size,
     observerAttached: !!observer, lastEvent
   });
