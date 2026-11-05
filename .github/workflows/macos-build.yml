@@ -20,6 +20,7 @@ on:
       - feature/notification-center-history
       - feature/reels-default-browser
       - feature/notification-relative-time-fix
+      - feature/memory-baseline-adaptive-polling
   workflow_dispatch:
 
 concurrency:
