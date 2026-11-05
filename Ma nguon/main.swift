@@ -124,20 +124,9 @@ let jsThongBao = """
     return false;
   };
 
-  // Số chưa đọc: messenger.com KHÔNG ghi số vào tiêu đề, mà gắn nhãn cho nút "Đoạn chat":
-  //   aria-label = "Đoạn chat · 5 tin nhắn chưa đọc"  (tiếng Anh: "Chats · 5 unread …"), hết tin → "Đoạn chat"
-  // 3 giây đọc 1 lần, chỉ báo Swift khi số thay đổi.
-  let soCu = -1;
-  setInterval(() => tinhTon('số chưa đọc', () => {
-    let so = 0;
-    document.querySelectorAll('[aria-label^="Đoạn chat"], [aria-label^="Chats"]').forEach(e => {
-      const m = e.getAttribute('aria-label').match(/^(?:Đoạn chat|Chats)\\s*·\\s*(\\d+)/);
-      if (m) so = Math.max(so, parseInt(m[1], 10));
-    });
-    if (so !== soCu) {
-      soCu = so; guiSwift({ soChuaDoc: so });
-    }
-  }), 3000);
+  // Dock badge comes from notification-engine.js rendered unread chat rows.
+  // Do NOT copy the Chats navigation ARIA count: it can represent a different
+  // message scope and does not necessarily match the visible conversation list.
 
   // Esc trong ô "Tìm kiếm trên Messenger": Messenger chỉ đóng gợi ý, chữ vẫn còn + con trỏ kẹt trong ô
   // → xoá chữ (nút "Xóa nội dung tìm kiếm") rồi thoát ô, về lại danh sách chat.
@@ -447,6 +436,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let callRinger = IncomingCallRinger()
     var callWindowsByPath: [String: NSWindow] = [:]
     var duplicateCallPopupsBlocked = 0
+    var dockUnreadBadge: Int? = nil
+    var dockBadgeScope = "unknown"
+    var dockRowsVisible = 0
+    var dockBadgeReports = 0
     var lastPermissionRequestResult = "Not yet completed"
     // We no longer retain WKWebView per notification. Conversation navigation
     // is stored in the notification payload and survives a page reload.
@@ -591,7 +584,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.makeKeyAndOrderFront(nil)
 
         webView.load(URLRequest(url: trangChu))
-        // Số chưa đọc trên Dock: đoạn JS trong jsThongBao đọc nhãn nút "Đoạn chat" rồi gửi { soChuaDoc } sang đây
+        // Dock unread count is supplied by notification-engine.js from its
+        // parsed, visible conversation rows (not the Chats navigation label).
     }
 
     // MARK: Giữ đăng nhập (lớp dự phòng)
@@ -651,9 +645,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }
             return
         }
-        if let so = d["soChuaDoc"] as? Int, message.webView == webView {
-            NSLog("VM: số chưa đọc = %d", so)
-            NSApp.dockTile.badgeLabel = so > 0 ? String(so) : nil
+        if let scope = d["nguonBadge"] as? String,
+           let count = d["soChuaDoc"] as? Int,
+           message.webView == webView,
+           ["rendered-conversations", "unknown"].contains(scope) {
+            dockBadgeScope = scope
+            dockUnreadBadge = scope == "rendered-conversations" ? max(0, min(count, 75)) : nil
+            dockRowsVisible = max(0, min(d["soDongHienThi"] as? Int ?? 0, 75))
+            dockBadgeReports += 1
+            NSApp.dockTile.badgeLabel = (dockUnreadBadge ?? 0) > 0 ? String(dockUnreadBadge!) : nil
+            NSLog("MN DOCK: badge source=%@, visible unread chats=%d, rows=%d",
+                  scope, dockUnreadBadge ?? -1, dockRowsVisible)
             return
         }
         if let id = d["dong"] as? String {
@@ -1557,6 +1559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     Notification Center: \(settings.notificationCenterSetting == .enabled ? "yes" : "no")
                     Web message chimes blocked: \(self.suppressedWebChimes)
                     \(self.nativeNotifications.status)
+                    Dock badge: \(self.dockUnreadBadge.map(String.init) ?? "none") | Source: \(self.dockBadgeScope) | Rendered rows: \(self.dockRowsVisible) | Reports: \(self.dockBadgeReports)
 
                     NotificationEngine: \(engine)
 
