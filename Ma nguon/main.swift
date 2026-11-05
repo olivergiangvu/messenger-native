@@ -653,7 +653,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             dockUnreadBadge = scope == "rendered-conversations" ? max(0, min(count, 75)) : nil
             dockRowsVisible = max(0, min(d["soDongHienThi"] as? Int ?? 0, 75))
             dockBadgeReports += 1
-            NSApp.dockTile.badgeLabel = (dockUnreadBadge ?? 0) > 0 ? String(dockUnreadBadge!) : nil
+            let badgeCount = dockUnreadBadge ?? 0
+            NSApp.dockTile.badgeLabel = badgeCount > 0 ? String(badgeCount) : nil
             NSLog("MN DOCK: badge source=%@, visible unread chats=%d, rows=%d",
                   scope, dockUnreadBadge ?? -1, dockRowsVisible)
             return
