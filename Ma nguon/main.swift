@@ -463,7 +463,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // Fallback alert if a known incoming-call ringtone was intercepted but
     // Messenger did not expose the expected accept/decline dialog.
     private var pendingCallFallback: DispatchWorkItem?
-    private var lastFallbackCallAlertAt: Date?
+    private var callAlertGate = IncomingCallAlertGate()
+    private(set) var callNativeNotificationErrors = 0
     private(set) var callFallbackCandidates = 0
     private(set) var callFallbackNotifications = 0
     private(set) var callFallbackDismissedByDialog = 0
@@ -656,12 +657,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
         if d["amChuongGoiDen"] as? Bool == true, message.webView == webView {
-            let sessionsBefore = callRinger.sessionsStarted
-            callRinger.soundCandidate()
-            // Only arm the fallback on a NEW ringtone session. The browser
-            // often repeats play() for a single call: do not spam banners.
-            if callRinger.sessionsStarted > sessionsBefore {
-                scheduleCallFallbackNotification()
+            // A ringtone is a call signal even if the AppKit ringer's stale
+            // session guard rejects playback. Never couple notification
+            // delivery to soundCandidate()/sessionsStarted.
+            if callAlertGate.ringtoneSignal(at: Date()) {
+                scheduleCallFallbackNotification(source: "known ringtone")
+            }
+            callRinger.soundCandidate(elementToken: d["audioElementToken"] as? String)
+            return
+        }
+        if d["mnWebIncomingCallHint"] as? Bool == true, message.webView == webView {
+            if callAlertGate.webCallHint(at: Date()) {
+                scheduleCallFallbackNotification(source: "web call notification")
             }
             return
         }
@@ -677,7 +684,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
             cancelCallFallbackNotification(dialogConfirmed: true)
-            callRinger.incomingDialogVisible(sessionID: g["phien"] as? String ?? "")
+            let sessionID = g["phien"] as? String ?? ""
+            callRinger.incomingDialogVisible(sessionID: sessionID)
+            if callAlertGate.confirmedDialog(sessionID: sessionID, at: Date()) {
+                sendNativeIncomingCallNotification(source: "confirmed dialog", isVideo: g["video"] as? Bool ?? false)
+            }
             if goiDen == nil, !NSApp.isActive, caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }   // chỉ cuộc gọi mới nảy Dock
             goiDen = (g["chu"] as? String ?? "Có người đang gọi cho bạn", g["anh"] as? String ?? "", g["video"] as? Bool ?? false, g["nhom"] as? Bool ?? false); capNhatBangGoi(); return
         }
@@ -729,36 +740,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    private func scheduleCallFallbackNotification() {
-        cancelCallFallbackNotification(dialogConfirmed: false)
+    private func sendNativeIncomingCallNotification(source: String, isVideo: Bool? = nil) {
+        let content = UNMutableNotificationContent()
+        content.title = (isVideo == true) ? "Cuộc gọi video Messenger đến" : "Cuộc gọi Messenger đến"
+        content.body = "Mở Messenger Native để xem và trả lời cuộc gọi."
+        content.userInfo = ["mnIncomingCall": true]
+        // The native ringer is normally audible already. If it was blocked
+        // by a stale session, provide a short system alert sound as backup.
+        if !callRinger.isRinging { content.sound = .default }
+        let id = "mn-incoming-call-" + UUID().uuidString
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            if let error {
+                DispatchQueue.main.async { self?.callNativeNotificationErrors += 1 }
+                NSLog("MN CALL: native notification failed: %@", error.localizedDescription)
+            }
+        }
+        callFallbackNotifications += 1
+        if !NSApp.isActive && caiDat("dockNayGoi", true) {
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+        NSLog("MN CALL: native incoming call notification queued (%@)", source)
+    }
+
+    private func scheduleCallFallbackNotification(source: String) {
+        // Do not move the timer on repeated audio.play() events: only the
+        // first signal of a burst should arm a single fallback.
+        guard pendingCallFallback == nil else { return }
         callFallbackCandidates += 1
         let task = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingCallFallback = nil
-            // The normal Messenger dialog + native call panel take precedence.
-            guard self.goiDen == nil, self.callRinger.isRinging else { return }
-            let now = Date()
-            // An incoming ring may replay after a WebKit media state change.
-            // Keep fallback cards to at most one per 60 seconds.
-            if let last = self.lastFallbackCallAlertAt, now.timeIntervalSince(last) < 60 { return }
-            self.lastFallbackCallAlertAt = now
-            let content = UNMutableNotificationContent()
-            content.title = "Cuộc gọi Messenger đến"
-            content.body = "Mở Messenger Native để xem và trả lời cuộc gọi."
-            content.userInfo = ["mnCallFallback": true]
-            // NativeCallRinger already plays a sound; avoid duplicate alerts.
-            let id = "mn-incoming-call-fallback-" + UUID().uuidString
-            let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request) { error in
-                if let error {
-                    NSLog("MN CALL: fallback notification failed: %@", error.localizedDescription)
-                }
-            }
-            self.callFallbackNotifications += 1
-            if !NSApp.isActive && self.caiDat("dockNayGoi", true) {
-                NSApp.requestUserAttention(.criticalRequest)
-            }
-            NSLog("MN CALL: known ringtone without detectable dialog; fallback notification queued")
+            // Normal dialog recognition has priority. A blocked ringtone
+            // MUST NOT prevent a fallback notification from being posted.
+            guard self.goiDen == nil else { return }
+            guard self.callAlertGate.fallbackNotification(at: Date()) else { return }
+            self.sendNativeIncomingCallNotification(source: source)
         }
         pendingCallFallback = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: task)
@@ -1674,9 +1691,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             \(self.callRinger.status)
             Active call windows: \(self.callWindowsByPath.count)
             Duplicate call popups blocked: \(self.duplicateCallPopupsBlocked)
-            Fallback ringtone sessions: \(self.callFallbackCandidates)
-            Fallback call notifications: \(self.callFallbackNotifications)
-            Fallback avoided when dialog detected: \(self.callFallbackDismissedByDialog)
+            Distinct fallback signals: \(self.callFallbackCandidates)
+            Native call notifications requested: \(self.callFallbackNotifications)
+            Native notification errors: \(self.callNativeNotificationErrors)
+            Fallback cancelled by dialog: \(self.callFallbackDismissedByDialog)
+            Audio signals: \(self.callAlertGate.ringtoneSignals)
+            Web notification call hints: \(self.callAlertGate.webCallSignals)
+            Call dialogs observed: \(self.callAlertGate.dialogSignals)
+            Dialog alerts: \(self.callAlertGate.dialogAlerts)
+            Fallback alerts: \(self.callAlertGate.fallbackAlerts)
+            Duplicate signals suppressed: \(self.callAlertGate.suppressed)
             Pending fallback: \(self.pendingCallFallback != nil)
             Main Messenger window currently visible: \(self.window.isVisible)
             App currently active: \(NSApp.isActive)
