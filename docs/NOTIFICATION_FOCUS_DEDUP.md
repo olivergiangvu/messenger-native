@@ -23,6 +23,34 @@ would accept it as a new `UNNotificationRequest` with a fresh identifier.
 The screenshot cannot definitively prove both entries came from the same
 source, but this is a confirmed correctness gap in the existing code.
 
+## Follow-up field regression — 2026-11-05 at 10:50 (PR #12 update)
+
+The previous focus-only fix improved delivery, but the user observed
+three separate notifications from the same conversation containing the
+same last emoji preview `Ma: 😂`, about **one to five minutes** apart.
+The screenshot does not show three distinct incoming chat messages.
+
+**Why the old fix still leaked:** it only rejected same-source duplicates
+within 2 seconds, cross-source within 8 seconds, or the same background
+notification in the first 10 seconds following reactivation. Outside those
+windows the same last preview could be delivered repeatedly.
+
+**Additional safeguard:** keep the most recently DELIVERED preview for
+each conversation for at most **10 minutes**. If the same chat and same
+title/body reappear within that interval, do not submit a new native
+notification. A different real message in that chat advances the marker
+and is sent immediately; if the old body later appears after a different
+message, it remains eligible. Other conversations are independent.
+
+This is a conservative best-effort rule: if the sender intentionally sends
+the *same* emoji/text again within 10 minutes without any different preview
+in between, the app cannot reliably tell it apart from a UI replay without
+Meta's actual message IDs. Such a repeated real message may be suppressed.
+
+`View → Notification Diagnostics…` now exposes `Last-preview repeats`
+in addition to `Same-source`, `Cross-source` and `Focus replays`.
+Only counters are logged, never the preview content or contact names.
+
 ## New native deduplication policy
 
 `NotificationDeduplicator.swift` is shared by both sources; the key remains
@@ -58,7 +86,10 @@ Under View → Notification Diagnostics…:
 - `Focus replays`: notifications already emitted in the latest background
   session suppressed during foreground activation
 
-The existing `Duplicates` metric is still the sum of all three.
+- `Last-preview repeats`: identical last chat preview redisplayed
+  minutes later and ignored
+
+The existing `Duplicates` metric sums all four categories.
 
 ## Important limits
 
@@ -87,10 +118,13 @@ different incoming content while app is focused continues to notify.
 6. Verify own messages, `Draft:` changes and send-button input remain silent.
 7. Verify emoji in preview and click notification → open correct chat with no
    full page reload.
-8. If a duplicate remains, check `View → Notification Diagnostics…` for
-   `Same-source`, `Cross-source`, `Focus replays`, `Last source`, and
-   `Submitted` before/after refocus. A screenshot with personal data hidden
-   is sufficient.
+8. While the app remains running, leave the most recent chat preview
+   unchanged for several minutes. The same last message/emoji must not
+   generate additional banners simply because the sidebar redraws.
+9. If a duplicate remains, check `View → Notification Diagnostics…` for
+   `Same-source`, `Cross-source`, `Focus replays`,
+   `Last-preview repeats`, `Last source` and `Submitted`. A screenshot
+   with personal data hidden is sufficient.
 
 Existing delivered notifications in macOS Notification Center are not
 retroactively removed.
