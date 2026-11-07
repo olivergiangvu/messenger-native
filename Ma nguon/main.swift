@@ -515,6 +515,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var pendingCallFallback: DispatchWorkItem?
     private var callAlertGate = IncomingCallAlertGate()
     private(set) var callNativeNotificationErrors = 0
+    // Only data from verified Meta-hosted subframes is accepted.
+    private(set) var callIframeReadyReports = 0
+    private(set) var callIframeVerifiedDialogs = 0
+    private(set) var callIframeIgnoredReports = 0
+    private var callIframeLastAlertAt: Date?
+    private var callIframePanel: BangGoiDen?
     private(set) var callFallbackCandidates = 0
     private(set) var callFallbackNotifications = 0
     private(set) var callFallbackDismissedByDialog = 0
@@ -614,6 +620,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             WKUserScript(source: jsCaiDat(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cauHinh.userContentController.addUserScript(
             WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // Read-only call visibility probe for subframes. The original
+        // call detector still runs solely in the main frame; this script
+        // never clicks call controls or reads caller/message identities.
+        if let frameURL = Bundle.main.url(forResource: "incoming-call-frame-probe", withExtension: "js"),
+           let frameScript = try? String(contentsOf: frameURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: frameScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            NSLog("MN CALL: read-only embedded-frame call probe injected")
+        } else {
+            NSLog("MN CALL ERROR: missing incoming-call-frame-probe.js")
+        }
         if let callURL = Bundle.main.url(forResource: "incoming-call-audio", withExtension: "js"),
            let callScript = try? String(contentsOf: callURL, encoding: .utf8) {
             cauHinh.userContentController.addUserScript(
@@ -716,6 +733,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let d = message.body as? [String: Any] else { return }
+        if let probe = d["mnIframeCallProbe"] as? [String: Any] {
+            guard message.webView == webView, !message.frameInfo.isMainFrame else { return }
+            let originHost = message.frameInfo.securityOrigin.host.lowercased()
+            let trusted = ["messenger.com", "facebook.com"].contains {
+                originHost == $0 || originHost.hasSuffix("." + $0)
+            }
+            guard trusted else {
+                callIframeIgnoredReports += 1
+                return
+            }
+            switch probe["kind"] as? String {
+            case "frameReady":
+                callIframeReadyReports += 1
+            case "confirmedDialog":
+                callIframeVerifiedDialogs += 1
+                let now = Date()
+                if callIframeLastAlertAt == nil ||
+                    now.timeIntervalSince(callIframeLastAlertAt!) >= 45 {
+                    callIframeLastAlertAt = now
+                    sendNativeIncomingCallNotification(source: "verified embedded call dialog")
+                    showVerifiedIframeCallPanel()
+                }
+            case "dialogEnded":
+                callIframePanel?.orderOut(nil)
+            default:
+                break
+            }
+            return
+        }
         if let raw = d["moNgoaiReel"] as? String,
            let url = URL(string: raw),
            LinkRouting.externalFacebookVideoURL(url) != nil,
@@ -889,6 +935,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let path = info.path
         DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self, weak panel] in
             guard self?.groupCallActive?.path == path else { return }
+            panel?.orderOut(nil)
+        }
+    }
+
+    private func showVerifiedIframeCallPanel() {
+        guard caiDat("bangGoiNoi", true) else { return }
+        let panel = callIframePanel ?? BangGoiDen()
+        callIframePanel = panel
+        panel.configureAsOngoingGroupCall(openTitle: "Mở Messenger")
+        panel.tieuDe.stringValue = "📞 Có cuộc gọi Messenger đến"
+        panel.chu.stringValue = "Mở Messenger để xem và trả lời cuộc gọi"
+        panel.bam = { [weak self] action in
+            guard let self else { return }
+            self.callIframePanel?.orderOut(nil)
+            if action == "Mở Messenger" {
+                NSApp.activate(ignoringOtherApps: true)
+                if self.window.isMiniaturized { self.window.deminiaturize(nil) }
+                self.window.makeKeyAndOrderFront(nil)
+            }
+        }
+        if let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(
+                x: screen.maxX - panel.frame.width - 16,
+                y: screen.maxY - panel.frame.height - 12))
+        }
+        panel.orderFrontRegardless()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak panel] in
             panel?.orderOut(nil)
         }
     }
@@ -1847,6 +1920,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             Distinct fallback signals: \(self.callFallbackCandidates)
             Native call notifications requested: \(self.callFallbackNotifications)
             Native notification errors: \(self.callNativeNotificationErrors)
+            Embedded-frame probe ready events: \(self.callIframeReadyReports)
+            Embedded-frame verified call dialogs: \(self.callIframeVerifiedDialogs)
+            Embedded-frame ignored/untrusted events: \(self.callIframeIgnoredReports)
+            Embedded-frame call panel visible: \(self.callIframePanel?.isVisible ?? false)
             New ongoing group call events: \(self.groupCallEvents)
             Ended group call events: \(self.groupCallEndedEvents)
             Group call banners requested: \(self.groupCallNotificationsRequested)
@@ -2110,8 +2187,8 @@ final class BangGoiDen: NSPanel {
     let anh = NSImageView(), chu = NSTextField(labelWithString: ""), tieuDe = NSTextField(labelWithString: "")
     var bam: ((String) -> Void)?
     private var actionButtons: [NSButton] = []
-    func configureAsOngoingGroupCall() {
-        for (index, text) in ["Bỏ qua", "Mở nhóm"].enumerated() {
+    func configureAsOngoingGroupCall(openTitle: String = "Mở nhóm") {
+        for (index, text) in ["Bỏ qua", openTitle].enumerated() {
             guard index < actionButtons.count else { continue }
             actionButtons[index].title = text
             actionButtons[index].attributedTitle = NSAttributedString(
