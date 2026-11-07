@@ -65,7 +65,10 @@
   // composer draft ("Draft: …", "Bản nháp: …"). This is a UI-state
   // change, NOT a new incoming message. Check the prefix before parsing
   // group sender labels; otherwise a group can mistakenly become "Draft".
-  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)\s*[:：]\s*/i;
+  // Meta can render a draft marker followed by a colon, a middle dot or a
+  // dash. Require a separator (or the whole word alone), otherwise a genuine
+  // inbound message starting "Draft proposal" would be suppressed.
+  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)(?:\s*[:：·—–-]\s*|\s*$)/i;
   const isDraftPreview = preview => draftPrefix.test(normalize(preview));
 
   // A selected conversation can be marked READ immediately. Its sidebar
@@ -92,8 +95,11 @@
 
   function rememberLocalText(editor, sendIntent) {
     const text = composerText(editor);
-    if (!text || isDraftPreview(text)) return;
     const path = normalizedPath(location.pathname);
+    // Clearing a composer must invalidate a draft fingerprint immediately;
+    // otherwise the next incoming message could match stale local text.
+    if (!text) { recentLocalText.delete(path); return; }
+    if (isDraftPreview(text)) return;
     const previous = recentLocalText.get(path);
     const timestamp = Date.now();
     // A send action refreshes the same candidate; regular input overwrites it.
@@ -110,17 +116,32 @@
 
   function recentLocalMatch(item) {
     const candidate = recentLocalText.get(normalizedPath(item.path));
-    if (!candidate || candidate.consumed ||
-        Date.now() - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
+    if (!candidate) return false;
     const visible = normalize(item.preview);
     const actual = candidate.text;
-    // Messenger sometimes prepends sender status without its "You:" label;
-    // the check is exact, or a sufficiently long visibly truncated prefix.
+    // Messenger sometimes prepends sender status without a "You:" label.
+    // Do not suppress a different real inbound message simply because this
+    // user has a composer open.
     const matched = visible === actual ||
       (visible.endsWith('…') && visible.length >= 16 &&
        actual.startsWith(visible.slice(0, -1)));
-    if (matched) candidate.consumed = true;
-    return matched;
+    if (!matched) return false;
+
+    const activeEditor = composerFor(document.activeElement);
+    const liveUnsentDraft = !candidate.sendIntent && activeEditor &&
+      composerText(activeEditor) === actual &&
+      normalizedPath(location.pathname) === normalizedPath(item.path);
+
+    // An active unsent composer is authoritative even after 12 seconds.
+    // A short-lived last-input fingerprint protects a blur/re-render event.
+    if (!liveUnsentDraft && Date.now() - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
+    if (candidate.sendIntent) {
+      // A completed SEND fingerprint is one-shot, but an unsent draft can
+      // legitimately update its sidebar preview multiple times.
+      if (candidate.consumed) return false;
+      candidate.consumed = true;
+    }
+    return true;
   }
 
   document.addEventListener('input', event => {
