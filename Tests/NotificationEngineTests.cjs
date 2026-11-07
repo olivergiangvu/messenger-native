@@ -535,6 +535,11 @@ currentPath = '/t/alice';
 hidden = false;
 focused = true;
 const plainDraft = 'Tôi đang soạn nội dung rất dài này và chưa hề bấm nút gửi từ máy của tôi';
+// A/B resume cleared all conversation baselines; establish this thread's
+// old preview before testing any changed local draft.
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Old message before composing', false)];
+mutationCallback();
+runTimers();
 composer = makeComposer(plainDraft);
 emitDocument('input', { target: composer });
 const beforePlainDraft = received().length;
