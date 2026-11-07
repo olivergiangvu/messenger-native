@@ -14,6 +14,7 @@ struct NotificationDeduplicator {
         case duplicateCrossSource
         case duplicateOnFocus
         case duplicateLastPreview
+        case duplicateHistoricalDOMReplay
     }
 
     private struct Record {
@@ -41,6 +42,12 @@ struct NotificationDeduplicator {
     private let keepFor: TimeInterval = 50 * 60
     private let sameSourceWindow: TimeInterval = 2
     private let lastPreviewWindow: TimeInterval = 10 * 60
+    // DOM previews lack independent message IDs. If a previously submitted
+    // text reappears later after an intervening sidebar status/preview, it is
+    // NOT evidence of a new message. Keep it from generating another banner
+    // for up to 45 minutes. Only constrain DOM fallback events; a genuinely
+    // new intercepted Web Notification remains eligible.
+    private let historicalDOMReplayWindow: TimeInterval = 45 * 60
     private let crossSourceWindow: TimeInterval = 8
     private let resumeWindow: TimeInterval = 10
     private let maxRecords = 250
@@ -89,6 +96,17 @@ struct NotificationDeduplicator {
                    now.timeIntervalSince(focusAt) <= resumeWindow {
                     return .duplicateOnFocus
                 }
+            }
+        }
+
+        // PR #12's prior lastByThread guard only remembered the LATEST
+        // accepted preview. When the sidebar oscillates A -> status B -> A,
+        // the earlier A would become eligible again. Retain a bounded
+        // historical record for heuristic DOM-only notifications.
+        if source == "dom", let previous = records[key] {
+            let age = now.timeIntervalSince(previous.timestamp)
+            if age >= 0 && age <= historicalDOMReplayWindow {
+                return .duplicateHistoricalDOMReplay
             }
         }
 
