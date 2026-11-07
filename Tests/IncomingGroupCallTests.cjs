@@ -10,7 +10,13 @@ const messages = [], timeouts = [], intervals = [];
 let observerCallback;
 const root = {};
 let rows = [];
-const row = (title, text, href = '/t/group') => ({
+const row = (title, text, href = '/t/group', outerStatus = '', extraLabel = '') => ({
+  innerText: [title, outerStatus].filter(Boolean).join('\n'),
+  getAttribute(name) { return name === 'aria-label' ? extraLabel : null; },
+  querySelectorAll(selector) {
+    assert.equal(selector, '[aria-label], [title]');
+    return [];
+  },
   querySelector(selector) {
     assert.equal(selector, 'a[href*="/t/"]');
     return {
@@ -61,13 +67,20 @@ flush();
 assert.equal(messages.length, 0, 'initial chat rows must be silently baselined');
 assert.equal(window.__mnGroupCallDetector.status().initialized, true);
 
-rows = [row('Ba Ông Tam Đa', 'Ongoing call\nMa joined the video call')];
+// Real screenshot layout: the row's separate status reads "Ongoing call",
+// while the anchor preview is unrelated. Do NOT require the latest member
+// joined event in this sidebar row (it may be in the open chat body).
+rows = [row('Ba Ông Tam Đa', 'Ma sent a photo', '/t/group', 'Ongoing call')];
 observerCallback();
 flush();
-assert.equal(messages.length, 1, 'genuine inactive->ongoing call transition');
+assert.equal(messages.length, 1, 'ongoing status outside anchor triggers fresh call');
 assert.equal(messages[0].mnGroupCallStarted.path, '/t/group');
 assert.equal(messages[0].mnGroupCallStarted.title, 'Ba Ông Tam Đa');
-assert.equal(messages[0].mnGroupCallStarted.video, true);
+assert.equal(window.__mnGroupCallDetector.status().lastScanOngoingRows, 1);
+assert.equal(window.__mnGroupCallDetector.status().lastScanJoinRows, 0,
+  'the row must work without any group-join text');
+assert.equal(messages[0].mnGroupCallStarted.video, false,
+  'video must not be invented when status gives no media type');
 intervals[0]();
 assert.equal(messages.length, 1, 'repeated scans must not spam group call');
 
@@ -78,10 +91,10 @@ flush();
 assert.equal(messages.length, 2, 'group call end must clear active session');
 assert.equal(messages[1].mnGroupCallEnded, '/t/group');
 
-rows = [row('Ba Ông Tam Đa', 'Ongoing call\nMa joined the video call')];
+rows = [row('Ba Ông Tam Đa', 'Ma sent a photo', '/t/group', '', 'Ongoing call')];
 observerCallback();
 flush();
-assert.equal(messages.length, 3, 'new live group call remains detected when message scanner is paused');
+assert.equal(messages.length, 3, 'accessibility-only ongoing status is detected while message scanner is paused');
 assert.equal(messages[2].mnGroupCallStarted.path, '/t/group');
 
 rows = [row('Ba Ông Tam Đa', 'Ma joined the video call')];
@@ -113,6 +126,9 @@ assert.equal(messages[4].mnGroupCallStarted.path, '/t/another');
 
 const status = window.__mnGroupCallDetector.status();
 assert.equal(status.detectedTransitions, 3);
+assert.equal(status.lastScanOngoingRows, 1);
+assert.ok(status.lastScanRows >= 2);
+assert.equal(status.version, '0.2-ongoing-status-transition');
 assert.equal(status.endedTransitions, 2);
 assert.equal(status.observerAttached, true);
 assert.ok(status.scans >= 7);
