@@ -20,8 +20,14 @@
   let observer = null;
   let observerRoot = null;
   let queued = false;
+  let lastScanRows = 0;
+  let lastScanOngoingRows = 0;
+  let lastScanJoinRows = 0;
+  let lastScanLiveRows = 0;
+  let initialActiveRows = 0;
+  let untrackedActiveRows = 0;
   const normalize = s => String(s || '').replace(/\s+/g, ' ').trim();
-  const ongoing = /(?:\bongoing call\b|cuộc gọi đang diễn ra|đang gọi nhóm)/i;
+  const ongoing = /(?:\bongoing\s+(?:(?:group|video|voice|audio)\s+)?call\b|cuộc gọi đang diễn ra|đang gọi nhóm)/i;
   const groupJoin = /(?:joined (?:the |a )?(?:group )?(?:video|voice|audio) call|started (?:the |a )?(?:group )?(?:video|voice|audio) call|tham gia cuộc gọi (?:video |thoại )?nhóm|bắt đầu cuộc gọi (?:video |thoại )?nhóm)/i;
   const video = /video|hình ảnh/i;
 
@@ -37,15 +43,28 @@
     const lines = String(anchor.innerText || '').split('\n')
       .map(normalize).filter(Boolean);
     if (!lines.length) return null;
-    // "Ongoing call" can be rendered as a separate status label outside
-    // the conversation anchor. Read only this one row, not the whole page.
-    const text = (lines.join(' ') + ' ' + String(row.innerText || '')).slice(0, 1000);
-    // Group-specific evidence + current call availability are BOTH required.
-    // "The video call ended" and a stale "Group video call" card never pass.
-    const active = ongoing.test(text) && groupJoin.test(text) &&
-                   !/^\s*(?:the video call ended|cuộc gọi đã kết thúc)\s*$/i.test(lines[lines.length - 1] || '');
+    // The screenshot shows "Ongoing call" in the sidebar status while
+    // "X joined the video call" appears in the OPEN CONVERSATION BODY.
+    // Requiring BOTH strings inside one sidebar row prevented any detection.
+    // Read row text and short accessibility labels; never read full chat body.
+    const attrs = [row, anchor].concat(
+      Array.from(row.querySelectorAll?.('[aria-label], [title]') || []).slice(0, 20)
+    ).map(node => {
+      if (typeof node.getAttribute !== 'function') return '';
+      return [node.getAttribute('aria-label'), node.getAttribute('title')]
+        .filter(Boolean).join(' ');
+    }).join(' ');
+    const text = (lines.join(' ') + ' ' + String(row.innerText || '') + ' ' + attrs)
+      .slice(0, 1600);
+    const hasOngoing = ongoing.test(text);
+    const hasJoin = groupJoin.test(text);
+    // A fresh, observable OFF -> ON transition in this existing thread is
+    // enough to describe an ongoing call. Join text is supplementary only.
+    // "Group video call / Tap to join" alone is never an active signal.
+    const active = hasOngoing;
     const name = lines[0].slice(0, 100);
-    return { path: url.pathname, name, active, video: video.test(text) };
+    return { path: url.pathname, name, active, hasOngoing, hasJoin,
+             video: video.test(text) };
   }
 
   function scan() {
@@ -55,8 +74,13 @@
     const rows = [...document.querySelectorAll('[role="row"]')].slice(0, MAX_ROWS);
     if (!rows.length) return;
     const current = rows.map(parseRow).filter(Boolean);
+    lastScanRows = current.length;
+    lastScanOngoingRows = current.filter(item => item.hasOngoing).length;
+    lastScanJoinRows = current.filter(item => item.hasJoin).length;
+    lastScanLiveRows = current.filter(item => item.active).length;
     if (!current.length) return;
     const first = !initialized;
+    if (first) initialActiveRows = lastScanLiveRows;
     initialized = true;
     const now = Date.now();
     for (const item of current) {
@@ -75,8 +99,9 @@
         endedTransitions++;
         emit({ mnGroupCallEnded: item.path });
       }
-      // Avoid alerts from navigating to an already active conversation:
-      // a new live call must transition from previously observed inactivity.
+      // An already-active unseen conversation is a historical baseline,
+      // NOT proof that a new group call has just started.
+      if (!first && item.active && !prior) untrackedActiveRows++;
       sessions.delete(item.path);
       sessions.set(item.path, { active: item.active, seen: now, reported: item.active && reported });
     }
@@ -113,10 +138,12 @@
   } else { connect(); scan(); }
   window.__mnGroupCallDetector = {
     status: () => ({
-      installed: true, version: '0.1-group-ongoing',
+      installed: true, version: '0.2-ongoing-status-transition',
       initialized, scans, detectedTransitions, endedTransitions,
-      observerAttached: !!observer, activeGroupRows: [...sessions.values()]
-        .filter(v => v.active).length
+      observerAttached: !!observer,
+      lastScanRows, lastScanOngoingRows, lastScanJoinRows, lastScanLiveRows,
+      initialActiveRows, untrackedActiveRows,
+      activeGroupRows: [...sessions.values()].filter(v => v.active).length
     })
   };
 })();
