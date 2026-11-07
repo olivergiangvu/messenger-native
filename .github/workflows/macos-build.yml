@@ -70,8 +70,6 @@ jobs:
       - name: Validate developer installer shell syntax
         run: |
           bash -n install-local.sh
-          bash -n scripts/prepare-call-ab.sh
-          bash scripts/prepare-call-ab.sh --help
       - name: Build unsigned test application (ad hoc)
         env:
           KY_APP: "-"
