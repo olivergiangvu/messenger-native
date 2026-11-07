@@ -37,7 +37,9 @@
     const lines = String(anchor.innerText || '').split('\n')
       .map(normalize).filter(Boolean);
     if (!lines.length) return null;
-    const text = lines.join(' ').slice(0, 700);
+    // "Ongoing call" can be rendered as a separate status label outside
+    // the conversation anchor. Read only this one row, not the whole page.
+    const text = (lines.join(' ') + ' ' + String(row.innerText || '')).slice(0, 1000);
     // Group-specific evidence + current call availability are BOTH required.
     // "The video call ended" and a stale "Group video call" card never pass.
     const active = ongoing.test(text) && groupJoin.test(text) &&
