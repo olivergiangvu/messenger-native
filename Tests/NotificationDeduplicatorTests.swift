@@ -88,8 +88,8 @@ struct NotificationDeduplicatorTests {
         var expires = NotificationDeduplicator()
         assert(expires.evaluate(key: emoji, source: "dom", at: time(0)) == .deliver)
         assert(expires.evaluate(key: emoji, source: "dom", at: time(600)) == .duplicateLastPreview)
-        assert(expires.evaluate(key: emoji, source: "dom", at: time(601)) == .duplicateLastPreview,
-               "A re-render seconds later is still the same last message")
+        assert(expires.evaluate(key: emoji, source: "dom", at: time(601)) == .duplicateHistoricalDOMReplay,
+               "The 10-minute last-preview guard expires, but the DOM historical replay guard still applies")
         assert(expires.evaluate(key: emoji, source: "dom", at: time(45 * 60 + 1)) == .deliver,
                "Historical DOM dedup expires after 45 minutes and is never permanent")
 
