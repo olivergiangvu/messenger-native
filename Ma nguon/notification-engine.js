@@ -20,6 +20,9 @@
   const MAX_PENDING = 80;
   const pending = [];
   let initialized = false;
+  // Call regression A/B only. Inert unless the user explicitly toggles via
+  // View > Call Diagnostics. Resets to OFF on every document reload.
+  let callTestPaused = false;
   let observedRoot = null;
   let observer = null;
   let scheduled = false;
@@ -336,6 +339,7 @@
   }
 
   function enqueue(item) {
+    if (callTestPaused) return;
     if (window.__vmCaiDat && window.__vmCaiDat.baoTinNhan === false) return;
     if (window.__vmCaiDat && window.__vmCaiDat.boTinGoi !== false &&
         Date.now() - (window.__vmGoiLuc || 0) < 8000 &&
@@ -355,6 +359,7 @@
     if (flushing || !pending.length) return;
     flushing = true;
     const tick = () => {
+      if (callTestPaused) { pending.length = 0; flushing = false; return; }
       const item = pending.shift();
       if (item) {
         send({
@@ -402,6 +407,7 @@
 
   function scan(reason) {
     scheduled = false;
+    if (callTestPaused) return;
     if (/groupcall/.test(location.pathname)) return;
     scans += 1;
     const rows = Array.from(document.querySelectorAll('[role="row"]')).slice(0, MAX_ROWS);
@@ -494,12 +500,13 @@
   }
 
   function schedule(reason) {
-    if (scheduled) return;
+    if (callTestPaused || scheduled) return;
     scheduled = true;
     setTimeout(() => scan(reason), 180);
   }
 
   function bindObserver() {
+    if (callTestPaused) return;
     const first = document.querySelector('[role="row"]');
     const root = first && (first.closest('[role="grid"], [role="list"], [role="navigation"]') ||
                            first.parentElement && first.parentElement.parentElement);
@@ -528,9 +535,41 @@
     bindObserver(); schedule('already-ready');
   }
 
+  // Temporary, explicit A/B control for a SINGLE test build. Pausing this
+  // DOM scanner does not disable the separate intercepted Web Notification
+  // bridge or incoming-call detector. Never carry state across reloads.
+  window.__mnNotificationEngineCallTest = {
+    status: () => ({
+      available: true, paused: callTestPaused, observerAttached: !!observer,
+      pending: pending.length, scans
+    }),
+    setPaused: (value) => {
+      const next = value === true;
+      if (next === callTestPaused) return { paused: callTestPaused, changed: false };
+      callTestPaused = next;
+      pending.length = 0;
+      flushing = false;
+      if (observer) observer.disconnect();
+      observer = null;
+      observedRoot = null;
+      scheduled = false;
+      // Resume from a silent baseline: do not manufacture notifications
+      // for chat previews that changed while the scanner was paused.
+      if (!next) {
+        conversations.clear();
+        initialized = false;
+        bindObserver();
+        schedule('call-test-resume');
+      }
+      lastEvent = next ? 'call-test-paused' : 'call-test-resumed-rebaseline';
+      return { paused: callTestPaused, changed: true };
+    }
+  };
+
   window.__mnNotificationStatus = () => ({
     version: '1.1-all-window-states',
     initialized, scans, sent, pending: pending.length,
+    callTestPaused,
     foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
     localSendSkipped,
     dockBadgeState, dockBadgeCount, dockRowsVisible, dockBadgeUpdates,
