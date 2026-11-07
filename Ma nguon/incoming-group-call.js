@@ -59,20 +59,24 @@
     const now = Date.now();
     for (const item of current) {
       const prior = sessions.get(item.path);
+      let reported = prior?.reported === true;
       if (!first && item.active && prior && !prior.active) {
         detectedTransitions++;
+        reported = true;
         emit({ mnGroupCallStarted: {
           path: item.path, title: item.name, video: item.video
         }});
       }
-      if (!first && !item.active && prior?.active) {
+      // An ongoing call present at first load was deliberately NOT announced:
+      // do not send a stray "ended" event for that unannounced older call.
+      if (!first && !item.active && prior?.active && prior.reported) {
         endedTransitions++;
         emit({ mnGroupCallEnded: item.path });
       }
-      // Avoid a new event from navigation to a previously unseen conversation:
-      // a new live call must transition from a previously observed inactive row.
+      // Avoid alerts from navigating to an already active conversation:
+      // a new live call must transition from previously observed inactivity.
       sessions.delete(item.path);
-      sessions.set(item.path, { active: item.active, seen: now });
+      sessions.set(item.path, { active: item.active, seen: now, reported: item.active && reported });
     }
     for (const [path, state] of sessions) {
       if (now - state.seen > 30 * 60 * 1000) sessions.delete(path);
