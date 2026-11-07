@@ -56,6 +56,7 @@ jobs:
           node Tests/IncomingCallAlertReliabilityTests.cjs
           node Tests/IncomingCallWebHintTests.cjs
           node Tests/CallDiagnosticsUiTests.cjs
+          node Tests/IncomingGroupCallTests.cjs
           node Tests/MenuLocalizationTests.cjs
           node Tests/InterfaceLocalizationTests.cjs
       - name: Validate macOS localization resources
@@ -79,6 +80,7 @@ jobs:
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/notification-navigation.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/reel-preview.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/incoming-call-audio.js"
+          test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/incoming-group-call.js"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/en.lproj/Menu.strings"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/vi.lproj/Menu.strings"
           test -f "$RUNNER_TEMP/messenger-native-ci/Messenger Native.app/Contents/Resources/en.lproj/Interface.strings"
