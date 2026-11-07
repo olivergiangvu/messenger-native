@@ -1798,7 +1798,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             let alert = NSAlert()
             alert.messageText = "Thử nghiệm A/B cuộc gọi"
             alert.informativeText = (value as? String)
-                ?? "Không thể đổi chế độ: \\(error?.localizedDescription ?? "unknown")"
+                ?? "Không thể đổi chế độ: \(error?.localizedDescription ?? "unknown")"
             alert.informativeText += """
 
             Chỉ bộ quét tin nhắn DOM bị tạm dừng. Web Notification, cuộc gọi
