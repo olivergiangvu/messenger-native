@@ -492,4 +492,37 @@ runTimers();
 assert.equal(received().length, countBeforeFallback + 2,
   'Different content, even with a time suffix, is a new preview');
 
+// A/B isolation regression: temporarily pause ONLY the DOM scanner.
+// The separate Web Notification API and incoming-call detection are untouched.
+const callTest = window.__mnNotificationEngineCallTest;
+assert.equal(callTest.status().paused, false, 'normal message scanning is the default');
+const pausedAt = received().length;
+const scansAtPause = window.__mnNotificationStatus().scans;
+assert.equal(callTest.setPaused(true).paused, true);
+assert.equal(callTest.status().observerAttached, false,
+  'pause disconnects the message observer instead of scanning in the background');
+rows = [row('/t/no-leaf', 'No leaf', 'Message arrived while call A/B is paused', true)];
+mutationCallback();
+intervals[0]();
+runTimers();
+assert.equal(received().length, pausedAt, 'paused DOM scanner must produce no message alerts');
+assert.equal(window.__mnNotificationStatus().scans, scansAtPause,
+  'pausing must stop both observer scans and recovery scans');
+assert.equal(callTest.status().paused, true);
+assert.equal(callTest.setPaused(false).paused, false,
+  'call test must be reversible without reloading the WebView');
+runTimers();
+assert.equal(received().length, pausedAt,
+  'resuming must not replay or backfill alerts for messages received while paused');
+assert.equal(window.__mnNotificationStatus().initialized, true,
+  'resuming must create a fresh silent baseline');
+rows = [row('/t/no-leaf', 'No leaf', 'Genuine new message after resume', true)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, pausedAt + 1,
+  'a genuinely new message after re-enable must still notify');
+assert.equal(callTest.status().paused, false);
+assert.equal(callTest.setPaused(false).changed, false,
+  'setting the existing mode cannot change its baseline');
+
 console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');
