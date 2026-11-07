@@ -43,7 +43,7 @@ class MutationObserver {
 }
 const context = {
   window, document, MutationObserver,
-  location: { href: 'https://www.messenger.com/t/group', pathname: '/t/group' },
+  location: { origin: 'https://www.messenger.com', href: 'https://www.messenger.com/t/group', pathname: '/t/group' },
   URL,
   setInterval(callback) { intervals.push(callback); },
   setTimeout(callback) { timeouts.push(callback); }
