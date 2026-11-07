@@ -612,74 +612,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if cauHinh.preferences.responds(to: NSSelectorFromString(ham)) { cauHinh.preferences.setValue(false, forKey: k) }
             else { NSLog("VM: không có %@ – bỏ qua", ham) }
         }
-        // Gắn "Notification giả" + cầu nối JS → Swift
-        if ProcessInfo.processInfo.environment["VM_NHIP"] == "1" {   // chế độ thử: bật nhịp tim trước script chính
-            cauHinh.userContentController.addUserScript(WKUserScript(source: "window.__vmNhip = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        }
-        cauHinh.userContentController.addUserScript(
-            WKUserScript(source: jsCaiDat(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        cauHinh.userContentController.addUserScript(
-            WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        // Read-only call visibility probe for subframes. The original
-        // call detector still runs solely in the main frame; this script
-        // never clicks call controls or reads caller/message identities.
-        if let frameURL = Bundle.main.url(forResource: "incoming-call-frame-probe", withExtension: "js"),
-           let frameScript = try? String(contentsOf: frameURL, encoding: .utf8) {
-            cauHinh.userContentController.addUserScript(
-                WKUserScript(source: frameScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-            NSLog("MN CALL: read-only embedded-frame call probe injected")
+        // Opt-in, EPHEMERAL diagnostic to distinguish our injected scripts
+        // from Messenger's own WKWebView/WebRTC call UI. No defaults, cookies,
+        // user agent, web view configuration, media permission or website data
+        // are changed. Do NOT use this mode for regular message notifications.
+        // Usage after quitting the normal app:
+        // MN_RAW_WEB_CALL_TEST=1 "$HOME/Applications/Messenger Native.app/Contents/MacOS/Messenger"
+        let rawWebCallTest = ProcessInfo.processInfo.environment["MN_RAW_WEB_CALL_TEST"] == "1"
+        if rawWebCallTest {
+            NSLog("MN CALL TEST: RAW WEB MODE — no custom page scripts installed; inspect website call modal ONLY")
         } else {
-            NSLog("MN CALL ERROR: missing incoming-call-frame-probe.js")
-        }
-        if let callURL = Bundle.main.url(forResource: "incoming-call-audio", withExtension: "js"),
-           let callScript = try? String(contentsOf: callURL, encoding: .utf8) {
+            // Gắn "Notification giả" + cầu nối JS → Swift
+            if ProcessInfo.processInfo.environment["VM_NHIP"] == "1" {   // chế độ thử: bật nhịp tim trước script chính
+                cauHinh.userContentController.addUserScript(WKUserScript(source: "window.__vmNhip = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            }
             cauHinh.userContentController.addUserScript(
-                WKUserScript(source: callScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN CALL: native ringtone bridge injected")
-        } else {
-            NSLog("MN CALL ERROR: missing incoming-call-audio.js")
-        }
-        // Group call availability is a different event from ringing one-to-one
-        // calls. Keep its event detection independent of the optional message
-        // DOM scanner A/B diagnostic.
-        if let groupURL = Bundle.main.url(forResource: "incoming-group-call", withExtension: "js"),
-           let groupScript = try? String(contentsOf: groupURL, encoding: .utf8) {
+                WKUserScript(source: jsCaiDat(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
             cauHinh.userContentController.addUserScript(
-                WKUserScript(source: groupScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN GROUP CALL: joinable call detector injected")
-        } else {
-            NSLog("MN GROUP CALL ERROR: missing incoming-group-call.js")
-        }
-        if let engineURL = Bundle.main.url(forResource: "notification-engine", withExtension: "js"),
-           let engine = try? String(contentsOf: engineURL, encoding: .utf8) {
-            cauHinh.userContentController.addUserScript(
-                WKUserScript(source: engine, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN NOTI: NotificationEngine injected (%d bytes)", engine.utf8.count)
-        } else {
-            NSLog("MN NOTI ERROR: missing notification-engine.js")
-        }
+                WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            // Read-only call visibility probe for subframes. The original
+            // call detector still runs solely in the main frame; this script
+            // never clicks call controls or reads caller/message identities.
+            if let frameURL = Bundle.main.url(forResource: "incoming-call-frame-probe", withExtension: "js"),
+               let frameScript = try? String(contentsOf: frameURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: frameScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+                NSLog("MN CALL: read-only embedded-frame call probe injected")
+            } else {
+                NSLog("MN CALL ERROR: missing incoming-call-frame-probe.js")
+            }
+            if let callURL = Bundle.main.url(forResource: "incoming-call-audio", withExtension: "js"),
+               let callScript = try? String(contentsOf: callURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: callScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN CALL: native ringtone bridge injected")
+            } else {
+                NSLog("MN CALL ERROR: missing incoming-call-audio.js")
+            }
+            // Group call availability is a different event from ringing one-to-one
+            // calls. Keep its event detection independent of the optional message
+            // DOM scanner A/B diagnostic.
+            if let groupURL = Bundle.main.url(forResource: "incoming-group-call", withExtension: "js"),
+               let groupScript = try? String(contentsOf: groupURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: groupScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN GROUP CALL: joinable call detector injected")
+            } else {
+                NSLog("MN GROUP CALL ERROR: missing incoming-group-call.js")
+            }
+            if let engineURL = Bundle.main.url(forResource: "notification-engine", withExtension: "js"),
+               let engine = try? String(contentsOf: engineURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: engine, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN NOTI: NotificationEngine injected (%d bytes)", engine.utf8.count)
+            } else {
+                NSLog("MN NOTI ERROR: missing notification-engine.js")
+            }
 
-        if let navURL = Bundle.main.url(forResource: "notification-navigation", withExtension: "js"),
-           let navScript = try? String(contentsOf: navURL, encoding: .utf8) {
-            cauHinh.userContentController.addUserScript(
-                WKUserScript(source: navScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN NOTI: in-page conversation navigation injected")
-        } else {
-            NSLog("MN NOTI ERROR: missing notification-navigation.js")
-        }
+            if let navURL = Bundle.main.url(forResource: "notification-navigation", withExtension: "js"),
+               let navScript = try? String(contentsOf: navURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: navScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN NOTI: in-page conversation navigation injected")
+            } else {
+                NSLog("MN NOTI ERROR: missing notification-navigation.js")
+            }
 
-        // Intercept video/Reel clicks at documentStart and hand off to the
-        // default browser. Never create an embedded Reel iframe or player.
-        // Messenger's original chat preview/thumbnail remains unchanged.
-        if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
-           let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
-            cauHinh.userContentController.addUserScript(
-                WKUserScript(source: reelSource, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN REEL: injected controller (%d UTF-8 bytes)", reelSource.utf8.count)
-        } else {
-            NSLog("MN REEL ERROR: missing reel-preview.js from app bundle")
-        }
+            // Intercept video/Reel clicks at documentStart and hand off to the
+            // default browser. Never create an embedded Reel iframe or player.
+            // Messenger's original chat preview/thumbnail remains unchanged.
+            if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
+               let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: reelSource, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN REEL: injected controller (%d UTF-8 bytes)", reelSource.utf8.count)
+            } else {
+                NSLog("MN REEL ERROR: missing reel-preview.js from app bundle")
+            }
 
+        }
         cauHinh.userContentController.add(self, name: "vmThongBao")
         // Giữ đăng nhập: theo dõi cookie để đổi cookie phiên thành cookie 1 năm
         cauHinh.websiteDataStore.httpCookieStore.add(self)
@@ -1915,6 +1926,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             dialog.messageText = "Call Diagnostics"
             dialog.informativeText = """
             \(self.callRinger.status)
+            Raw WebKit call test mode: \(ProcessInfo.processInfo.environment["MN_RAW_WEB_CALL_TEST"] == "1")
             Active call windows: \(self.callWindowsByPath.count)
             Duplicate call popups blocked: \(self.duplicateCallPopupsBlocked)
             Distinct fallback signals: \(self.callFallbackCandidates)
