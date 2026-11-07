@@ -1852,6 +1852,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             Group call banners requested: \(self.groupCallNotificationsRequested)
             Group call banner errors: \(self.groupCallNotificationErrors)
             Group call panel visible: \(self.groupCallPanel?.isVisible ?? false)
+            Group call floating panel setting enabled: \(self.caiDat("bangGoiNoi", true))
             Fallback cancelled by dialog: \(self.callFallbackDismissedByDialog)
             Audio signals: \(self.callAlertGate.ringtoneSignals)
             Web notification call hints: \(self.callAlertGate.webCallSignals)
@@ -2112,6 +2113,7 @@ final class BangGoiDen: NSPanel {
     func configureAsOngoingGroupCall() {
         for (index, text) in ["Bỏ qua", "Mở nhóm"].enumerated() {
             guard index < actionButtons.count else { continue }
+            actionButtons[index].title = text
             actionButtons[index].attributedTitle = NSAttributedString(
                 string: text,
                 attributes: [
