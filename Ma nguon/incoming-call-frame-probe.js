@@ -45,6 +45,7 @@
       // Only a Boolean event: no names, message contents or conversation IDs.
       send({ kind: 'confirmedDialog', present: true });
     }
+    if (!found && matched) send({ kind: 'dialogEnded' });
     matched = found;
   }
   function schedule() {
