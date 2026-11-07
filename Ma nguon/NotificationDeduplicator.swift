@@ -99,17 +99,6 @@ struct NotificationDeduplicator {
             }
         }
 
-        // PR #12's prior lastByThread guard only remembered the LATEST
-        // accepted preview. When the sidebar oscillates A -> status B -> A,
-        // the earlier A would become eligible again. Retain a bounded
-        // historical record for heuristic DOM-only notifications.
-        if source == "dom", let previous = records[key] {
-            let age = now.timeIntervalSince(previous.timestamp)
-            if age >= 0 && age <= historicalDOMReplayWindow {
-                return .duplicateHistoricalDOMReplay
-            }
-        }
-
         // Identical last message reappearing after 1–5 minutes is a
         // re-render of the existing preview unless there is independent
         // message identity evidence. The earlier 2/8-second guards cannot
@@ -120,6 +109,17 @@ struct NotificationDeduplicator {
            now.timeIntervalSince(last.timestamp) >= 0,
            now.timeIntervalSince(last.timestamp) <= lastPreviewWindow {
             return .duplicateLastPreview
+        }
+
+        // PR #12's prior lastByThread guard only remembered the LATEST
+        // accepted preview. When the sidebar oscillates A -> status B -> A,
+        // the earlier A would become eligible again. Retain a bounded
+        // historical record for heuristic DOM-only notifications.
+        if source == "dom", let previous = records[key] {
+            let age = now.timeIntervalSince(previous.timestamp)
+            if age >= 0 && age <= historicalDOMReplayWindow {
+                return .duplicateHistoricalDOMReplay
+            }
         }
 
         records[key] = Record(timestamp: now, source: source,
