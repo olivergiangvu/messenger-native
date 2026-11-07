@@ -593,6 +593,6 @@ rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Đối phương trả lời độc l
 mutationCallback();
 runTimers();
 assert.equal(received().length, beforePlainDraft + 3,
-  'An incoming message unlike the user's draft must remain eligible');
+  "An incoming message unlike the user's draft must remain eligible");
 
 console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');
