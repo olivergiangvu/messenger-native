@@ -20,7 +20,7 @@ Across PRs #4, #10, #11, #12, #13, #14, #15, #16, and #17:
 | PR | Changed relevant behavior | Can it directly remove incoming-call popup? | Plausible indirect concern |
 |---|---|---|---|
 | #11 | All-window message notifications; `notification-engine.js` scanning/events; native **message** chime now entirely system notification | No, call DOM and native panel unchanged | Extra DOM scans/event observer and page load, but no `preventDefault`, `stopPropagation`, deletion or modification of call elements seen |
-| #12 | `NotificationDeduplicator` focus replay; observer calls `didResignActive/didBecomeActive` | No | Notification focus state, but only within **message** coordinator, not incoming-call bridge |
+| #12 | New `NotificationDeduplicator` for all `web`/`dom` notification payloads; last-preview dedup up to **10 minutes** | No | **Real banner risk**: two genuine incoming-call Web Notification events with identical title/body and no distinct validated thread/event key can be classified as a repeated preview. Does not remove the in-app call panel. |
 | #13 | Remove legacy 3s unread Dock count from `jsThongBao`; replace with badge from `notification-engine.js` | No | Edit in same injected script, but no dangling references found; call detector section unchanged |
 | #14 | Suppress generic unread-message status; stable ID to replace same-thread card (subsequently reverted) | No | Generic filter matches exact unread/new-message strings, not confirmed call/ringtone; only inside `NativeNotificationCoordinator.deliver` |
 | #15 | Restore unique IDs in Notification Center to retain message history | No | Presentation history only |
@@ -28,6 +28,14 @@ Across PRs #4, #10, #11, #12, #13, #14, #15, #16, and #17:
 | #17 | Remove relative timestamp from message previews and prevent duplicate aging-based messages | No | Only `notification-engine.js`; no call path or call notification selector edits |
 
 PR #18 **does** reduce idle recovery polling from 700 ms to 1,400 ms, but wasn't installed at first report. PR #20 initially *introduced* another regression by limiting the legacy call selector to `button[aria-label]` or `[role=button][aria-label]`. That has been reverted in PR #20 (original selector restored first), with regression test for nested `SPAN aria-label` controls. Neither explains the **first** missed call on an earlier app.
+
+## Specific banner regression risk in PR #12
+
+`NativeNotificationCoordinator.deliver` applies `NotificationDeduplicator.evaluate` to **all non-test `web` and `dom` events**, without an incoming-call exception. The fingerprint is `(path ?? rawThread) + US + title + US + body`. If a live Web Notification lacks a valid conversation path, the thread may be an empty string, making otherwise distinct real calls share an identical key. `lastPreviewWindow = 10 * 60` seconds suppresses an identical preview even if the new incoming-call event is a legitimate separate request.
+
+**This is a demonstrable source-level over-broad filter** introduced in PR #12, and can contribute to missing **macOS call banners**, especially after another similar call; it does **not** by itself prevent the DOM call popup or the native floating panel. The PR #20 Web Notification live-call hint sends a separate signal, bypassing this generic message coordinator when the live-call classifier matches. It still depends on a real page event.
+
+PR #11 separately removed the foreground `Tink` sound for *incoming-message chime* and relies on UserNotifications sound. This can change perceived audio feedback, but the known **incoming-call** ringtone has its own `incoming-call-audio.js` and `IncomingCallRinger` path; avoid conflating them.
 
 ## Native banner path
 
