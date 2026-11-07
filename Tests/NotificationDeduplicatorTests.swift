@@ -14,8 +14,10 @@ struct NotificationDeduplicatorTests {
         assert(immediate.evaluate(key: keyA, source: "dom", at: time(1)) == .duplicateSameSource)
         assert(immediate.evaluate(key: keyA, source: "web", at: time(3)) == .duplicateCrossSource)
         assert(immediate.evaluate(key: keyB, source: "dom", at: time(3)) == .deliver)
-        assert(immediate.evaluate(key: keyA, source: "dom", at: time(9)) == .deliver,
-               "A different delivered preview advances the conversation; earlier text may be sent again")
+        assert(immediate.evaluate(key: keyA, source: "dom", at: time(9)) == .duplicateHistoricalDOMReplay,
+               "Intervening sidebar text is not proof that an already notified DOM preview is a new message")
+        assert(immediate.evaluate(key: keyA, source: "web", at: time(12)) == .deliver,
+               "An explicit fresh Web Notification with the same body remains eligible")
 
         var focused = NotificationDeduplicator()
         focused.didResignActive(at: time(10))
@@ -30,15 +32,18 @@ struct NotificationDeduplicatorTests {
         let newMessage = "/t/alice\u{001f}Alice\u{001f}Actual new message after refocus"
         assert(focused.evaluate(key: newMessage, source: "dom", at: time(21 * 60 + 4)) == .deliver,
                "Real new incoming text after focus must still notify")
-        assert(focused.evaluate(key: keyA, source: "dom", at: time(21 * 60 + 11)) == .deliver,
-               "After focus grace window, old content is not blocked indefinitely")
+        assert(focused.evaluate(key: keyA, source: "dom", at: time(21 * 60 + 11)) == .duplicateHistoricalDOMReplay,
+               "Old DOM previews still cannot become a new message just after the focus grace window")
 
         // Previously-delivered text from another background cycle must not be
         // treated as a replay of the current background session.
         focused.didResignActive(at: time(21 * 60 + 20))
         focused.didBecomeActive(at: time(21 * 60 + 22))
-        assert(focused.evaluate(key: keyB, source: "dom", at: time(21 * 60 + 23)) == .deliver,
-               "A different background epoch cannot replay-suppress historical text")
+        assert(focused.evaluate(key: keyB, source: "dom", at: time(21 * 60 + 23)) == .duplicateHistoricalDOMReplay,
+               "Changing focus epochs cannot turn old DOM snapshots into new chat events")
+        let brandNew = "/t/alice\u{001f}Alice\u{001f}Brand new text in the next background epoch"
+        assert(focused.evaluate(key: brandNew, source: "dom", at: time(21 * 60 + 24)) == .deliver,
+               "A genuinely new preview remains eligible even in a new background epoch")
 
         // Unrelated focus activations, such as app launch, must not enable
         // the replay-suppression mode.
@@ -71,8 +76,10 @@ struct NotificationDeduplicatorTests {
                "Same last emoji +5min should not notify again")
         assert(repeatedEmoji.evaluate(key: newEmoji, source: "dom", at: time(301)) == .deliver,
                "Different actual reply must notify immediately")
-        assert(repeatedEmoji.evaluate(key: emoji, source: "dom", at: time(302)) == .deliver,
-               "A distinct delivered message advances the chat; earlier text becomes eligible again")
+        assert(repeatedEmoji.evaluate(key: emoji, source: "dom", at: time(302)) == .duplicateHistoricalDOMReplay,
+               "A -> B -> A from the same sidebar is an old preview replay, not a new emoji")
+        assert(repeatedEmoji.evaluate(key: emoji, source: "web", at: time(315)) == .deliver,
+               "New Web Notification is not blanket muted by the DOM-only historical guard")
 
         // Different conversation, same body: no cross-chat suppression.
         let otherThread = "/t/bob\u{001f}Bob\u{001f}Ma: 😂"
@@ -81,9 +88,24 @@ struct NotificationDeduplicatorTests {
         var expires = NotificationDeduplicator()
         assert(expires.evaluate(key: emoji, source: "dom", at: time(0)) == .deliver)
         assert(expires.evaluate(key: emoji, source: "dom", at: time(600)) == .duplicateLastPreview)
-        assert(expires.evaluate(key: emoji, source: "dom", at: time(601)) == .deliver,
-               "A real identical message much later must not be suppressed indefinitely")
+        assert(expires.evaluate(key: emoji, source: "dom", at: time(601)) == .duplicateHistoricalDOMReplay,
+               "The 10-minute last-preview guard expires, but the DOM historical replay guard still applies")
+        assert(expires.evaluate(key: emoji, source: "dom", at: time(45 * 60 + 1)) == .deliver,
+               "Historical DOM dedup expires after 45 minutes and is never permanent")
 
-        print("Notification deduplicator tests passed: same/cross source, 21-minute focus replay, 1–5min emoji replay, distinct new messages and expiry")
+        // Repeating a historical preview after an unrelated status or emoji
+        // must not create a new banner in another conversation. A different
+        // path remains independently eligible.
+        var oscillation = NotificationDeduplicator()
+        let oldPreview = "/t/group\u{001f}Group\u{001f}Last message"
+        let statusPreview = "/t/group\u{001f}Group\u{001f}Ongoing call"
+        assert(oscillation.evaluate(key: oldPreview, source: "dom", at: time(0)) == .deliver)
+        assert(oscillation.evaluate(key: statusPreview, source: "dom", at: time(65)) == .deliver)
+        assert(oscillation.evaluate(key: oldPreview, source: "dom", at: time(70)) == .duplicateHistoricalDOMReplay)
+        assert(oscillation.evaluate(key: oldPreview, source: "dom", at: time(15 * 60)) == .duplicateHistoricalDOMReplay)
+        assert(oscillation.evaluate(key: "/t/other\u{001f}Other\u{001f}Last message",
+                                    source: "dom", at: time(71)) == .deliver)
+
+        print("Notification deduplicator tests passed: same/cross source, DOM A-B-A replay, 21-minute focus, emoji oscillation, fresh Web events and expiry")
     }
 }

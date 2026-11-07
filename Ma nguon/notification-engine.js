@@ -20,6 +20,9 @@
   const MAX_PENDING = 80;
   const pending = [];
   let initialized = false;
+  // Call regression A/B only. Inert unless the user explicitly toggles via
+  // View > Call Diagnostics. Resets to OFF on every document reload.
+  let callTestPaused = false;
   let observedRoot = null;
   let observer = null;
   let scheduled = false;
@@ -62,7 +65,10 @@
   // composer draft ("Draft: …", "Bản nháp: …"). This is a UI-state
   // change, NOT a new incoming message. Check the prefix before parsing
   // group sender labels; otherwise a group can mistakenly become "Draft".
-  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)\s*[:：]\s*/i;
+  // Meta can render a draft marker followed by a colon, a middle dot or a
+  // dash. Require a separator (or the whole word alone), otherwise a genuine
+  // inbound message starting "Draft proposal" would be suppressed.
+  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)(?:\s*[:：·—–-]\s*|\s*$)/i;
   const isDraftPreview = preview => draftPrefix.test(normalize(preview));
 
   // A selected conversation can be marked READ immediately. Its sidebar
@@ -89,8 +95,11 @@
 
   function rememberLocalText(editor, sendIntent) {
     const text = composerText(editor);
-    if (!text || isDraftPreview(text)) return;
     const path = normalizedPath(location.pathname);
+    // Clearing a composer must invalidate a draft fingerprint immediately;
+    // otherwise the next incoming message could match stale local text.
+    if (!text) { recentLocalText.delete(path); return; }
+    if (isDraftPreview(text)) return;
     const previous = recentLocalText.get(path);
     const timestamp = Date.now();
     // A send action refreshes the same candidate; regular input overwrites it.
@@ -107,17 +116,32 @@
 
   function recentLocalMatch(item) {
     const candidate = recentLocalText.get(normalizedPath(item.path));
-    if (!candidate || candidate.consumed ||
-        Date.now() - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
+    if (!candidate) return false;
     const visible = normalize(item.preview);
     const actual = candidate.text;
-    // Messenger sometimes prepends sender status without its "You:" label;
-    // the check is exact, or a sufficiently long visibly truncated prefix.
+    // Messenger sometimes prepends sender status without a "You:" label.
+    // Do not suppress a different real inbound message simply because this
+    // user has a composer open.
     const matched = visible === actual ||
       (visible.endsWith('…') && visible.length >= 16 &&
        actual.startsWith(visible.slice(0, -1)));
-    if (matched) candidate.consumed = true;
-    return matched;
+    if (!matched) return false;
+
+    const activeEditor = composerFor(document.activeElement);
+    const liveUnsentDraft = !candidate.sendIntent && activeEditor &&
+      composerText(activeEditor) === actual &&
+      normalizedPath(location.pathname) === normalizedPath(item.path);
+
+    // An active unsent composer is authoritative even after 12 seconds.
+    // A short-lived last-input fingerprint protects a blur/re-render event.
+    if (!liveUnsentDraft && Date.now() - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
+    if (candidate.sendIntent) {
+      // A completed SEND fingerprint is one-shot, but an unsent draft can
+      // legitimately update its sidebar preview multiple times.
+      if (candidate.consumed) return false;
+      candidate.consumed = true;
+    }
+    return true;
   }
 
   document.addEventListener('input', event => {
@@ -336,6 +360,7 @@
   }
 
   function enqueue(item) {
+    if (callTestPaused) return;
     if (window.__vmCaiDat && window.__vmCaiDat.baoTinNhan === false) return;
     if (window.__vmCaiDat && window.__vmCaiDat.boTinGoi !== false &&
         Date.now() - (window.__vmGoiLuc || 0) < 8000 &&
@@ -355,6 +380,7 @@
     if (flushing || !pending.length) return;
     flushing = true;
     const tick = () => {
+      if (callTestPaused) { pending.length = 0; flushing = false; return; }
       const item = pending.shift();
       if (item) {
         send({
@@ -402,6 +428,7 @@
 
   function scan(reason) {
     scheduled = false;
+    if (callTestPaused) return;
     if (/groupcall/.test(location.pathname)) return;
     scans += 1;
     const rows = Array.from(document.querySelectorAll('[role="row"]')).slice(0, MAX_ROWS);
@@ -494,12 +521,13 @@
   }
 
   function schedule(reason) {
-    if (scheduled) return;
+    if (callTestPaused || scheduled) return;
     scheduled = true;
     setTimeout(() => scan(reason), 180);
   }
 
   function bindObserver() {
+    if (callTestPaused) return;
     const first = document.querySelector('[role="row"]');
     const root = first && (first.closest('[role="grid"], [role="list"], [role="navigation"]') ||
                            first.parentElement && first.parentElement.parentElement);
@@ -528,9 +556,41 @@
     bindObserver(); schedule('already-ready');
   }
 
+  // Temporary, explicit A/B control for a SINGLE test build. Pausing this
+  // DOM scanner does not disable the separate intercepted Web Notification
+  // bridge or incoming-call detector. Never carry state across reloads.
+  window.__mnNotificationEngineCallTest = {
+    status: () => ({
+      available: true, paused: callTestPaused, observerAttached: !!observer,
+      pending: pending.length, scans
+    }),
+    setPaused: (value) => {
+      const next = value === true;
+      if (next === callTestPaused) return { paused: callTestPaused, changed: false };
+      callTestPaused = next;
+      pending.length = 0;
+      flushing = false;
+      if (observer) observer.disconnect();
+      observer = null;
+      observedRoot = null;
+      scheduled = false;
+      // Resume from a silent baseline: do not manufacture notifications
+      // for chat previews that changed while the scanner was paused.
+      if (!next) {
+        conversations.clear();
+        initialized = false;
+        bindObserver();
+        schedule('call-test-resume');
+      }
+      lastEvent = next ? 'call-test-paused' : 'call-test-resumed-rebaseline';
+      return { paused: callTestPaused, changed: true };
+    }
+  };
+
   window.__mnNotificationStatus = () => ({
     version: '1.1-all-window-states',
     initialized, scans, sent, pending: pending.length,
+    callTestPaused,
     foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
     localSendSkipped,
     dockBadgeState, dockBadgeCount, dockRowsVisible, dockBadgeUpdates,

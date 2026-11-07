@@ -10,6 +10,7 @@ final class NativeNotificationCoordinator {
     private(set) var crossSourceDuplicates = 0
     private(set) var focusReplays = 0
     private(set) var lastPreviewRepeats = 0
+    private(set) var historicalDOMReplays = 0
     private(set) var genericStatusSuppressed = 0
     private(set) var webSubmitted = 0
     private(set) var webEventsWithoutThread = 0
@@ -120,6 +121,11 @@ final class NativeNotificationCoordinator {
                 lastPreviewRepeats += 1
                 NSLog("MN NOTI: same last chat preview redisplayed; suppressed")
                 return
+            case .duplicateHistoricalDOMReplay:
+                suppressed += 1
+                historicalDOMReplays += 1
+                NSLog("MN NOTI: historical DOM preview re-rendered; suppressed")
+                return
             }
         }
 
@@ -187,6 +193,6 @@ final class NativeNotificationCoordinator {
     }
 
     var status: String {
-        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Generic suppressed: \(genericStatusSuppressed) | DOM submitted: \(domSubmitted) | Web submitted: \(webSubmitted) | Web no-thread received: \(webEventsWithoutThread) | Web no-thread submitted: \(webSubmittedWithoutThread) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
+        "Received: \(received) | Submitted: \(submitted) | Duplicates: \(suppressed) | Same-source: \(sameSourceDuplicates) | Cross-source: \(crossSourceDuplicates) | Focus replays: \(focusReplays) | Last-preview repeats: \(lastPreviewRepeats) | Historical DOM replays: \(historicalDOMReplays) | Generic suppressed: \(genericStatusSuppressed) | DOM submitted: \(domSubmitted) | Web submitted: \(webSubmitted) | Web no-thread received: \(webEventsWithoutThread) | Web no-thread submitted: \(webSubmittedWithoutThread) | Errors: \(errors) | Unread labels removed: \(cleanedUnreadLabels) | Last source: \(lastSource)\nLast submission error: \(lastSubmissionError)"
     }
 }

@@ -15,6 +15,7 @@ let rows = [];
 let hidden = false;
 let focused = true;
 let currentPath = '/';
+let testClock = Date.now();
 const documentListeners = new Map();
 
 const observerRoot = {};
@@ -91,6 +92,7 @@ vm.runInNewContext(source, {
   setTimeout(callback) { timeouts.push(callback); },
   setInterval(callback) { intervals.push(callback); },
   URL,
+  Date: { now: () => testClock },
 });
 
 const received = () => messages.filter((item) => item.id && item.nguon === 'dom');
@@ -491,5 +493,111 @@ mutationCallback();
 runTimers();
 assert.equal(received().length, countBeforeFallback + 2,
   'Different content, even with a time suffix, is a new preview');
+
+// A/B isolation regression: temporarily pause ONLY the DOM scanner.
+// The separate Web Notification API and incoming-call detection are untouched.
+const callTest = window.__mnNotificationEngineCallTest;
+assert.equal(callTest.status().paused, false, 'normal message scanning is the default');
+const pausedAt = received().length;
+const scansAtPause = window.__mnNotificationStatus().scans;
+assert.equal(callTest.setPaused(true).paused, true);
+assert.equal(callTest.status().observerAttached, false,
+  'pause disconnects the message observer instead of scanning in the background');
+rows = [row('/t/no-leaf', 'No leaf', 'Message arrived while call A/B is paused', true)];
+mutationCallback();
+intervals[0]();
+runTimers();
+assert.equal(received().length, pausedAt, 'paused DOM scanner must produce no message alerts');
+assert.equal(window.__mnNotificationStatus().scans, scansAtPause,
+  'pausing must stop both observer scans and recovery scans');
+assert.equal(callTest.status().paused, true);
+assert.equal(callTest.setPaused(false).paused, false,
+  'call test must be reversible without reloading the WebView');
+runTimers();
+assert.equal(received().length, pausedAt,
+  'resuming must not replay or backfill alerts for messages received while paused');
+assert.equal(window.__mnNotificationStatus().initialized, true,
+  'resuming must create a fresh silent baseline');
+rows = [row('/t/no-leaf', 'No leaf', 'Genuine new message after resume', true)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, pausedAt + 1,
+  'a genuinely new message after re-enable must still notify');
+assert.equal(callTest.status().paused, false);
+assert.equal(callTest.setPaused(false).changed, false,
+  'setting the existing mode cannot change its baseline');
+
+// Regression Nov 7: unsent composer can appear in Messenger sidebar WITHOUT
+// the explicit "Draft:" badge, and the same editor text can re-render from
+// shortened -> longer -> full preview. Never consume a draft fingerprint on
+// the first match; it must remain available until the composer actually sends.
+currentPath = '/t/alice';
+hidden = false;
+focused = true;
+const plainDraft = 'Tôi đang soạn nội dung rất dài này và chưa hề bấm nút gửi từ máy của tôi';
+// A/B resume cleared all conversation baselines; establish this thread's
+// old preview before testing any changed local draft.
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Old message before composing', false)];
+mutationCallback();
+runTimers();
+composer = makeComposer(plainDraft);
+emitDocument('input', { target: composer });
+const beforePlainDraft = received().length;
+for (const fragment of [
+  plainDraft.slice(0, 25) + '…',
+  plainDraft.slice(0, 45) + '…',
+  plainDraft
+]) {
+  rows = [row('/t/alice', 'Ba Ông Tam Đa', fragment, false)];
+  mutationCallback();
+  runTimers();
+  assert.equal(received().length, beforePlainDraft,
+    'The same unsent draft in multiple preview layouts must not notify');
+}
+assert.ok(window.__mnNotificationStatus().localSendSkipped >= 5,
+  'Draft preview matches must be suppressed even without a Draft: badge');
+
+// Staying in the composer beyond the 12-second fingerprint TTL still proves
+// that a matching sidebar preview is the user's unsent local draft.
+testClock += 20000;
+rows = [row('/t/alice', 'Ba Ông Tam Đa', plainDraft.slice(0, 52) + '…', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforePlainDraft,
+  'A live unsent composer stays suppressed beyond the old 12-second TTL');
+
+// Alternative explicit Draft delimiters must also be ignored without requiring
+// a recent local-input event. Do not suppress a genuine "Draft proposal" text.
+for (const draft of ['Draft · một nội dung', 'Bản nháp – đang viết', 'Nháp—tin đang soạn']) {
+  rows = [row('/t/alice', 'Ba Ông Tam Đa', draft, false)];
+  mutationCallback();
+  runTimers();
+  assert.equal(received().length, beforePlainDraft,
+    'Explicit draft variants are local UI state, never incoming messages');
+}
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Draft proposal đã được gửi từ người khác', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforePlainDraft + 1,
+  'A genuine incoming message starting with the English word Draft must notify');
+
+// Clearing the local editor invalidates its fingerprint immediately.
+// A distinct incoming event matching formerly typed text is NOT a local send.
+composer.innerText = '';
+emitDocument('input', { target: composer });
+rows = [row('/t/alice', 'Ba Ông Tam Đa', plainDraft, false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforePlainDraft + 2,
+  'Cleared composer cannot suppress a subsequent inbound message');
+
+// An unmatched incoming message during typing must still notify.
+composer.innerText = 'Tôi đang gõ phần khác';
+emitDocument('input', { target: composer });
+rows = [row('/t/alice', 'Ba Ông Tam Đa', 'Đối phương trả lời độc lập', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforePlainDraft + 3,
+  "An incoming message unlike the user's draft must remain eligible");
 
 console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');

@@ -13,6 +13,8 @@ final class IncomingCallRinger {
     private var lastDialogSeen: Date?
     private var confirmedSessionID: String?
     private var needsNewSessionAfterStop = false
+    private var lastAudioElementToken: String?
+    private var lastStopAt: Date?
 
     private(set) var soundCandidates = 0
     private(set) var sessionsStarted = 0
@@ -22,16 +24,25 @@ final class IncomingCallRinger {
 
     var isRinging: Bool { startedAt != nil }
 
-    func soundCandidate() {
+    func soundCandidate(elementToken: String? = nil) {
         soundCandidates += 1
         let now = Date()
-        // A late/repeated WebKit play() after call completion cannot re-arm
-        // the ringtone. Only a NEW visible call dialog can do that.
-        guard !needsNewSessionAfterStop else {
-            duplicateCandidates += 1
-            return
+        if needsNewSessionAfterStop {
+            // A DIFFERENT HTMLAudioElement is positive evidence of a new
+            // incoming ring, even when Meta has not rendered a call dialog.
+            // If Messenger reuses the same element, allow a fresh attempt
+            // only after a quiet interval, never a late same-second replay.
+            let freshAudioElement = elementToken != nil && elementToken != lastAudioElementToken
+            let enoughTimePassed = lastStopAt.map { now.timeIntervalSince($0) >= 15 } ?? false
+            guard freshAudioElement || enoughTimePassed else {
+                duplicateCandidates += 1
+                return
+            }
+            needsNewSessionAfterStop = false
+            confirmedSessionID = nil
         }
-        // Repeated MediaElement.play calls must NEVER prolong a stale call.
+        if let elementToken { lastAudioElementToken = elementToken }
+        // Repeated MediaElement.play calls must NEVER prolong a live ring.
         guard startedAt == nil else {
             duplicateCandidates += 1
             return
@@ -105,6 +116,7 @@ final class IncomingCallRinger {
         sound = nil
         startedAt = nil
         lastDialogSeen = nil
+        lastStopAt = Date()
         // Prevent a late WebKit play() or delayed DOM callback from bringing
         // back the ringtone after hangup. A later fresh call can ring.
         needsNewSessionAfterStop = true

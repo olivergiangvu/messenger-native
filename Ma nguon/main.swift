@@ -56,6 +56,15 @@ let jsThongBao = """
   const guiSwift = (d) => window.webkit.messageHandlers.vmThongBao.postMessage(d);
   guiSwift({ nhatKy: 'Notification gốc của trang: ' + typeof window.Notification });
   const danhSach = {};   // id → đối tượng thông báo, để khi bấm thì gọi lại onclick của trang
+  // Treat only a live incoming-call announcement as a call signal.
+  // Missed/ended calls remain ordinary message notifications.
+  // Do not transmit caller name, preview text or notification URL.
+  const laThongBaoGoiDen = (title, body) => {
+    const text = String(title || '') + ' ' + String(body || '');
+    const active = /incoming[ ]+(?:audio[ ]+|video[ ]+|voice[ ]+)?call|is[ ]+calling|calling[ ]+you|đang gọi|cuộc gọi đến|gọi đến/i.test(text);
+    const ended = /missed[ ]+(?:(?:audio|video)[ ]+)?call|cuộc gọi nhỡ|bỏ lỡ cuộc gọi|missed[ ]+(?:an?[ ]+)?(?:audio|video)[ ]+call|call[ ]+ended|đã kết thúc/i.test(text);
+    return active && !ended;
+  };
   class ThongBao {
     constructor(tieuDe, tuyChon) {
       tuyChon = tuyChon || {};
@@ -66,8 +75,12 @@ let jsThongBao = """
       // Original page callbacks are short-lived; notification taps also carry
       // a stable conversation path in native UNNotificationContent.userInfo.
       setTimeout(() => { delete danhSach[this._id]; }, 15 * 60 * 1000);
-      guiSwift({ id: this._id, tieuDe: this.title, noiDung: this.body,
-                 tag: this.tag, duongDan: this.tag, nguon: 'web' });
+      if (laThongBaoGoiDen(this.title, this.body)) {
+        guiSwift({ mnWebIncomingCallHint: true });
+      } else {
+        guiSwift({ id: this._id, tieuDe: this.title, noiDung: this.body,
+                   tag: this.tag, duongDan: this.tag, nguon: 'web' });
+      }
     }
     close() { guiSwift({ dong: this._id }); delete danhSach[this._id]; }
     addEventListener(loai, ham) { if (loai === 'click') this.onclick = ham; if (loai === 'close') this.onclose = ham; }
@@ -212,8 +225,42 @@ let jsThongBao = """
   // Hộp "Cuộc gọi đến" của Messenger (dò 03/11: role=dialog, nút aria-label "Từ chối" / "Chấp nhận")
   // → gửi chữ "X đang gọi cho bạn" + ảnh đại diện cho Swift hiện BẢNG NỔI ở góc màn hình (anh chọn cách B, 03/11).
   // Không ghi tên vào nhật ký. Hộp biến mất (người kia gác / đã bấm) → báo Swift ẩn bảng.
-  const nutGoiDen = (nhan) => [...document.querySelectorAll('[role="dialog"] [aria-label], [role="alertdialog"] [aria-label]')]
-    .find(e => e.getAttribute('aria-label') === nhan);
+  // Meta can change button wording or render a call card without role=dialog.
+  // Broader labels are allowed ONLY for a real dialog, or a compact card that
+  // contains BOTH a decline control and explicit live incoming-call text.
+  // The extra check prevents ordinary chat "Accept" buttons from firing calls.
+  const nhanChapNhanGoi = /^(?:chấp nhận|accept|answer|trả lời)(?:\\s+(?:cuộc gọi|call|audio call|video call|voice call))?$/i;
+  const nhanTuChoiGoi = /^(?:từ chối|decline|ignore|bỏ qua)(?:\\s+(?:cuộc gọi|call|audio call|video call|voice call))?$/i;
+  const nhanNut = e => String(e.getAttribute('aria-label') || '').trim();
+  const noiDungDangGoi = /đang gọi|is calling|calling you|incoming (?:audio |video |voice )?call|đã mời bạn tham gia cuộc gọi|invited you to (?:join|a call)/i;
+  function hopGoiTuNut(e) {
+    const dialog = e.closest('[role="dialog"], [role="alertdialog"]');
+    if (dialog) return dialog;
+    let parent = e.parentElement;
+    for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
+      const text = String(parent.innerText || '').slice(0, 900);
+      if (!noiDungDangGoi.test(text)) continue;
+      if ([...parent.querySelectorAll('[aria-label]')].some(button => nhanTuChoiGoi.test(nhanNut(button)))) {
+        return parent;
+      }
+    }
+    return null;
+  }
+  const nutGoiDen = nhan => {
+    const re = nhan === 'Chấp nhận' || nhan === 'Accept' ? nhanChapNhanGoi
+      : nhan === 'Từ chối' || nhan === 'Decline' ? nhanTuChoiGoi : null;
+    if (!re) return null;
+    // FIRST preserve the exact proven legacy selector: Messenger can attach
+    // aria-label to a nested span/svg instead of an actual button node.
+    // Restrict this path to role=dialog/alertdialog as the old build did.
+    const legacy = [...document.querySelectorAll('[role="dialog"] [aria-label], [role="alertdialog"] [aria-label]')]
+      .find(e => re.test(nhanNut(e)) && !!e.closest('[role="dialog"], [role="alertdialog"]'));
+    if (legacy) return legacy;
+    // Only if the known-good DOM path is absent, accept alternative call cards
+    // with BOTH explicit incoming-call wording and a decline control.
+    return [...document.querySelectorAll('button[aria-label], [role="button"][aria-label]')]
+      .find(e => re.test(nhanNut(e)) && !!hopGoiTuNut(e)) || null;
+  };
   // Tên nhóm của cuộc gọi nhóm: trong 6 dòng chat đầu, dòng có NHIỀU ảnh đại diện (ảnh nhóm = 2 ảnh chồng) hoặc tên có dấu phẩy
   // (nhóm chưa đặt tên → "Tên A, Tên B"), ưu tiên dòng có tên người gọi / tin về cuộc gọi. Không chắc → để trống.
   const tenNhomGoi = (nguoiGoi) => {
@@ -233,11 +280,14 @@ let jsThongBao = """
   let hopCu = '', kieuGoi = 'thoai', hopMatLuc = 0, lanNhipGoi = 0;
   let phienGoi = '', soPhienGoi = 0;
   let soLanQuetGoi = 0, soQuetTuObserver = 0, ganObserverGoi = false, henQuetGoi = false;
+  let soLanTimThayHopGoi = 0, soLanBaoSwiftGoi = 0, soLanBaoSwiftGac = 0, hopGoiGanNhatLuc = 0;
   const quetHopGoi = () => tinhTon('hộp gọi', () => {
     soLanQuetGoi++;
     const nut = nutGoiDen('Chấp nhận') || nutGoiDen('Accept');
-    const hop = nut ? nut.closest('[role="dialog"], [role="alertdialog"]') : null;
+    const hop = nut ? hopGoiTuNut(nut) : null;
     if (hop) {
+      soLanTimThayHopGoi++;
+      hopGoiGanNhatLuc = Date.now();
       hopMatLuc = 0;
       const nay = Date.now();
       // Stable opaque token per detected call dialog. Do not transmit names.
@@ -268,7 +318,9 @@ let jsThongBao = """
             ', chữ=' + JSON.stringify(cheTen) + ', hìnhNút=' + ve + ' → gọi ' + kieuGoi + (laNhom ? ' NHÓM' : '') });
         }
         if (laNhom) guiSwift({ nhatKy: 'DÒ TB: gọi nhóm – tên nhóm ' + (tenNhom ? 'đã tìm thấy (' + tenNhom.length + ' ký tự)' : 'CHƯA thấy') });
-        hopCu = khoa; guiSwift({ goiDenHien: { chu, anh, video: kieuGoi === 'video', nhom: laNhom, phien: phienGoi } });
+        hopCu = khoa;
+        soLanBaoSwiftGoi++;
+        guiSwift({ goiDenHien: { chu, anh, video: kieuGoi === 'video', nhom: laNhom, phien: phienGoi } });
       }
     } else if (hopCu) {
       // Messenger may re-render the incoming-call modal temporarily. Debounce
@@ -279,6 +331,7 @@ let jsThongBao = """
         hopMatLuc = 0;
         phienGoi = '';
         window.__vmGoiLuc = Date.now();
+        soLanBaoSwiftGac++;
         guiSwift({ goiDenAn: true });
       }
     }
@@ -331,11 +384,34 @@ let jsThongBao = """
     if (!observerCuocGoi) batQuanSatCuocGoi();
     quetHopGoi();
   }, 700);
-  window.__mnCallDetectionStatus = () => ({
-    version: '1.0', observerAttached: ganObserverGoi,
-    scans: soLanQuetGoi, observerScans: soQuetTuObserver,
-    incomingDialogActive: !!hopCu
-  });
+  window.__mnCallDetectionStatus = () => {
+    // One-shot read, never a resident timer or message-content collection.
+    const labels = [...document.querySelectorAll('[aria-label]')];
+    return {
+      version: '1.2-call-bridge-inspection',
+      installed: true,
+      host: location.hostname,
+      routeFamily: location.pathname.startsWith('/messages') ? '/messages'
+        : location.pathname.startsWith('/t/') ? '/t/'
+        : location.pathname.startsWith('/groupcall') ? '/groupcall' : 'other',
+      documentReady: document.readyState,
+      pageHidden: document.hidden,
+      pageFocused: document.hasFocus(),
+      observerAttached: ganObserverGoi,
+      scans: soLanQuetGoi,
+      observerScans: soQuetTuObserver,
+      incomingDialogActive: !!hopCu,
+      liveDialogScanHits: soLanTimThayHopGoi,
+      incomingBridgeReports: soLanBaoSwiftGoi,
+      endedBridgeReports: soLanBaoSwiftGac,
+      secondsSinceLastIncomingDialog: hopGoiGanNhatLuc
+        ? Math.round((Date.now() - hopGoiGanNhatLuc) / 1000) : null,
+      openDialogElements: document.querySelectorAll('[role="dialog"],[role="alertdialog"]').length,
+      acceptOrAnswerButtons: labels.filter(e => nhanChapNhanGoi.test(nhanNut(e))).length,
+      declineButtons: labels.filter(e => nhanTuChoiGoi.test(nhanNut(e))).length,
+      iframes: document.querySelectorAll('iframe').length
+    };
+  };
 
   window.__vmBamGoiDen = (nhan) => {
     const e = nutGoiDen(nhan) || nutGoiDen(nhan === 'Chấp nhận' ? 'Accept' : 'Decline');
@@ -434,6 +510,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let nativeNotifications = NativeNotificationCoordinator()
     var suppressedWebChimes = 0
     let callRinger = IncomingCallRinger()
+    // Fallback alert if a known incoming-call ringtone was intercepted but
+    // Messenger did not expose the expected accept/decline dialog.
+    private var pendingCallFallback: DispatchWorkItem?
+    private var callAlertGate = IncomingCallAlertGate()
+    private(set) var callNativeNotificationErrors = 0
+    // Only data from verified Meta-hosted subframes is accepted.
+    private(set) var callIframeReadyReports = 0
+    private(set) var callIframeVerifiedDialogs = 0
+    private(set) var callIframeIgnoredReports = 0
+    private var callIframeLastAlertAt: Date?
+    private var callIframePanel: BangGoiDen?
+    private(set) var callFallbackCandidates = 0
+    private(set) var callFallbackNotifications = 0
+    private(set) var callFallbackDismissedByDialog = 0
     var callWindowsByPath: [String: NSWindow] = [:]
     var duplicateCallPopupsBlocked = 0
     private var lastExternalReel: (url: String, at: Date)?
@@ -456,6 +546,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var goiDen: (chu: String, anh: String, video: Bool, nhom: Bool)?
     var choLuu: [() -> Void] = []                            // hộp "Lưu vào đâu" đang chờ (tải nhiều file cùng lúc)          // hộp "Cuộc gọi đến" đang hiện trên trang
     var bangGoi: BangGoiDen?                         // bảng nổi báo cuộc gọi đến
+    private var groupCallActive: (path: String, title: String, video: Bool)?
+    private var groupCallPanel: BangGoiDen?
+    private var groupCallLastShown: [String: Date] = [:]
+    private(set) var groupCallEvents = 0
+    private(set) var groupCallEndedEvents = 0
+    private(set) var groupCallNotificationsRequested = 0
+    private(set) var groupCallNotificationErrors = 0
     var taiVe: [ObjectIdentifier: URL] = [:]       // file đang tải → nơi lưu
     var dangTai: [WKDownload] = []                  // giữ lượt tải (không giữ → bị huỷ giữa chừng, thử 03/11)
     var pip: [ObjectIdentifier: TrangThaiPiP] = [:]  // cửa sổ cuộc gọi → trạng thái PiP
@@ -515,52 +612,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if cauHinh.preferences.responds(to: NSSelectorFromString(ham)) { cauHinh.preferences.setValue(false, forKey: k) }
             else { NSLog("VM: không có %@ – bỏ qua", ham) }
         }
-        // Gắn "Notification giả" + cầu nối JS → Swift
-        if ProcessInfo.processInfo.environment["VM_NHIP"] == "1" {   // chế độ thử: bật nhịp tim trước script chính
-            cauHinh.userContentController.addUserScript(WKUserScript(source: "window.__vmNhip = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        }
-        cauHinh.userContentController.addUserScript(
-            WKUserScript(source: jsCaiDat(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        cauHinh.userContentController.addUserScript(
-            WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        if let callURL = Bundle.main.url(forResource: "incoming-call-audio", withExtension: "js"),
-           let callScript = try? String(contentsOf: callURL, encoding: .utf8) {
-            cauHinh.userContentController.addUserScript(
-                WKUserScript(source: callScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN CALL: native ringtone bridge injected")
+        // Opt-in, EPHEMERAL diagnostic to distinguish our injected scripts
+        // from Messenger's own WKWebView/WebRTC call UI. No defaults, cookies,
+        // user agent, web view configuration, media permission or website data
+        // are changed. Do NOT use this mode for regular message notifications.
+        // Usage after quitting the normal app:
+        // MN_RAW_WEB_CALL_TEST=1 "$HOME/Applications/Messenger Native.app/Contents/MacOS/Messenger"
+        let rawWebCallTest = ProcessInfo.processInfo.environment["MN_RAW_WEB_CALL_TEST"] == "1"
+        if rawWebCallTest {
+            NSLog("MN CALL TEST: RAW WEB MODE — no custom page scripts installed; inspect website call modal ONLY")
         } else {
-            NSLog("MN CALL ERROR: missing incoming-call-audio.js")
-        }
-        if let engineURL = Bundle.main.url(forResource: "notification-engine", withExtension: "js"),
-           let engine = try? String(contentsOf: engineURL, encoding: .utf8) {
+            // Gắn "Notification giả" + cầu nối JS → Swift
+            if ProcessInfo.processInfo.environment["VM_NHIP"] == "1" {   // chế độ thử: bật nhịp tim trước script chính
+                cauHinh.userContentController.addUserScript(WKUserScript(source: "window.__vmNhip = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            }
             cauHinh.userContentController.addUserScript(
-                WKUserScript(source: engine, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN NOTI: NotificationEngine injected (%d bytes)", engine.utf8.count)
-        } else {
-            NSLog("MN NOTI ERROR: missing notification-engine.js")
-        }
+                WKUserScript(source: jsCaiDat(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: jsThongBao, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            // Read-only call visibility probe for subframes. The original
+            // call detector still runs solely in the main frame; this script
+            // never clicks call controls or reads caller/message identities.
+            if let frameURL = Bundle.main.url(forResource: "incoming-call-frame-probe", withExtension: "js"),
+               let frameScript = try? String(contentsOf: frameURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: frameScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+                NSLog("MN CALL: read-only embedded-frame call probe injected")
+            } else {
+                NSLog("MN CALL ERROR: missing incoming-call-frame-probe.js")
+            }
+            if let callURL = Bundle.main.url(forResource: "incoming-call-audio", withExtension: "js"),
+               let callScript = try? String(contentsOf: callURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: callScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN CALL: native ringtone bridge injected")
+            } else {
+                NSLog("MN CALL ERROR: missing incoming-call-audio.js")
+            }
+            // Group call availability is a different event from ringing one-to-one
+            // calls. Keep its event detection independent of the optional message
+            // DOM scanner A/B diagnostic.
+            if let groupURL = Bundle.main.url(forResource: "incoming-group-call", withExtension: "js"),
+               let groupScript = try? String(contentsOf: groupURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: groupScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN GROUP CALL: joinable call detector injected")
+            } else {
+                NSLog("MN GROUP CALL ERROR: missing incoming-group-call.js")
+            }
+            if let engineURL = Bundle.main.url(forResource: "notification-engine", withExtension: "js"),
+               let engine = try? String(contentsOf: engineURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: engine, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN NOTI: NotificationEngine injected (%d bytes)", engine.utf8.count)
+            } else {
+                NSLog("MN NOTI ERROR: missing notification-engine.js")
+            }
 
-        if let navURL = Bundle.main.url(forResource: "notification-navigation", withExtension: "js"),
-           let navScript = try? String(contentsOf: navURL, encoding: .utf8) {
-            cauHinh.userContentController.addUserScript(
-                WKUserScript(source: navScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN NOTI: in-page conversation navigation injected")
-        } else {
-            NSLog("MN NOTI ERROR: missing notification-navigation.js")
-        }
+            if let navURL = Bundle.main.url(forResource: "notification-navigation", withExtension: "js"),
+               let navScript = try? String(contentsOf: navURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: navScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN NOTI: in-page conversation navigation injected")
+            } else {
+                NSLog("MN NOTI ERROR: missing notification-navigation.js")
+            }
 
-        // Intercept video/Reel clicks at documentStart and hand off to the
-        // default browser. Never create an embedded Reel iframe or player.
-        // Messenger's original chat preview/thumbnail remains unchanged.
-        if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
-           let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
-            cauHinh.userContentController.addUserScript(
-                WKUserScript(source: reelSource, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            NSLog("MN REEL: injected controller (%d UTF-8 bytes)", reelSource.utf8.count)
-        } else {
-            NSLog("MN REEL ERROR: missing reel-preview.js from app bundle")
-        }
+            // Intercept video/Reel clicks at documentStart and hand off to the
+            // default browser. Never create an embedded Reel iframe or player.
+            // Messenger's original chat preview/thumbnail remains unchanged.
+            if let reelScriptURL = Bundle.main.url(forResource: "reel-preview", withExtension: "js"),
+               let reelSource = try? String(contentsOf: reelScriptURL, encoding: .utf8) {
+                cauHinh.userContentController.addUserScript(
+                    WKUserScript(source: reelSource, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                NSLog("MN REEL: injected controller (%d UTF-8 bytes)", reelSource.utf8.count)
+            } else {
+                NSLog("MN REEL ERROR: missing reel-preview.js from app bundle")
+            }
 
+        }
         cauHinh.userContentController.add(self, name: "vmThongBao")
         // Giữ đăng nhập: theo dõi cookie để đổi cookie phiên thành cookie 1 năm
         cauHinh.websiteDataStore.httpCookieStore.add(self)
@@ -614,6 +744,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let d = message.body as? [String: Any] else { return }
+        if let probe = d["mnIframeCallProbe"] as? [String: Any] {
+            guard message.webView == webView, !message.frameInfo.isMainFrame else { return }
+            let originHost = message.frameInfo.securityOrigin.host.lowercased()
+            let trusted = ["messenger.com", "facebook.com"].contains {
+                originHost == $0 || originHost.hasSuffix("." + $0)
+            }
+            guard trusted else {
+                callIframeIgnoredReports += 1
+                return
+            }
+            switch probe["kind"] as? String {
+            case "frameReady":
+                callIframeReadyReports += 1
+            case "confirmedDialog":
+                callIframeVerifiedDialogs += 1
+                let now = Date()
+                if callIframeLastAlertAt == nil ||
+                    now.timeIntervalSince(callIframeLastAlertAt!) >= 45 {
+                    callIframeLastAlertAt = now
+                    sendNativeIncomingCallNotification(source: "verified embedded call dialog")
+                    showVerifiedIframeCallPanel()
+                }
+            case "dialogEnded":
+                callIframePanel?.orderOut(nil)
+            default:
+                break
+            }
+            return
+        }
         if let raw = d["moNgoaiReel"] as? String,
            let url = URL(string: raw),
            LinkRouting.externalFacebookVideoURL(url) != nil,
@@ -623,23 +782,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         if let nk = d["nhatKy"] as? String { if ghiGoLoi || !nk.hasPrefix("DÒ") { NSLog("VM: %@", nk) }; return }
         if d["amChuongGoiDen"] as? Bool == true, message.webView == webView {
-            callRinger.soundCandidate()
+            // A ringtone is a call signal even if the AppKit ringer's stale
+            // session guard rejects playback. Never couple notification
+            // delivery to soundCandidate()/sessionsStarted.
+            if callAlertGate.ringtoneSignal(at: Date()) {
+                scheduleCallFallbackNotification(source: "known ringtone")
+            }
+            callRinger.soundCandidate(elementToken: d["audioElementToken"] as? String)
+            return
+        }
+        if d["mnWebIncomingCallHint"] as? Bool == true, message.webView == webView {
+            if callAlertGate.webCallHint(at: Date()) {
+                scheduleCallFallbackNotification(source: "web call notification")
+            }
             return
         }
         if d["chuongGoiDung"] as? Bool == true, message.webView == webView {
+            cancelCallFallbackNotification(dialogConfirmed: false)
             callRinger.stop(reason: "call accepted or declined")
             return
         }
         if let session = d["goiDangDo"] as? String, message.webView == webView {
+            cancelCallFallbackNotification(dialogConfirmed: true)
             callRinger.incomingDialogVisible(sessionID: session)
             return
         }
+        if let hint = d["mnGroupCallStarted"] as? [String: Any], message.webView == webView {
+            let path = hint["path"] as? String ?? ""
+            guard NotificationDeepLink.url(forPath: path) != nil else { return }
+            groupCallEvents += 1
+            let now = Date()
+            if groupCallActive?.path == path { return }
+            if let previous = groupCallLastShown[path], now.timeIntervalSince(previous) < 60 { return }
+            groupCallLastShown[path] = now
+            if groupCallLastShown.count > 50 {
+                groupCallLastShown = groupCallLastShown.filter { now.timeIntervalSince($0.value) < 15 * 60 }
+            }
+            let title = String((hint["title"] as? String ?? "Cuộc trò chuyện nhóm").prefix(100))
+            groupCallActive = (path: path, title: title, video: hint["video"] as? Bool ?? false)
+            showOngoingGroupCallPanel()
+            sendOngoingGroupCallBanner(path: path, title: title)
+            return
+        }
+        if let ended = d["mnGroupCallEnded"] as? String, message.webView == webView {
+            groupCallEndedEvents += 1
+            if groupCallActive?.path == ended {
+                groupCallPanel?.orderOut(nil)
+                groupCallActive = nil
+            }
+            return
+        }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
-            callRinger.incomingDialogVisible(sessionID: g["phien"] as? String ?? "")
+            cancelCallFallbackNotification(dialogConfirmed: true)
+            let sessionID = g["phien"] as? String ?? ""
+            callRinger.incomingDialogVisible(sessionID: sessionID)
+            if callAlertGate.confirmedDialog(sessionID: sessionID, at: Date()) {
+                sendNativeIncomingCallNotification(source: "confirmed dialog", isVideo: g["video"] as? Bool ?? false)
+            }
             if goiDen == nil, !NSApp.isActive, caiDat("dockNayGoi", true) { NSApp.requestUserAttention(.criticalRequest) }   // chỉ cuộc gọi mới nảy Dock
             goiDen = (g["chu"] as? String ?? "Có người đang gọi cho bạn", g["anh"] as? String ?? "", g["video"] as? Bool ?? false, g["nhom"] as? Bool ?? false); capNhatBangGoi(); return
         }
         if d["goiDenAn"] != nil, message.webView == webView {
+            cancelCallFallbackNotification(dialogConfirmed: false)
             callRinger.stop(reason: "incoming call dialog closed")
             goiDen = nil; capNhatBangGoi(); return
         }
@@ -676,6 +880,142 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard d["id"] is String else { return }
         guard caiDat("baoTinNhan", true) else { return }
         nativeNotifications.deliver(d)
+    }
+
+    private func cancelCallFallbackNotification(dialogConfirmed: Bool) {
+        if pendingCallFallback != nil {
+            if dialogConfirmed { callFallbackDismissedByDialog += 1 }
+            pendingCallFallback?.cancel()
+            pendingCallFallback = nil
+        }
+    }
+
+    private func sendOngoingGroupCallBanner(path: String, title: String) {
+        guard NotificationDeepLink.url(forPath: path) != nil else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Cuộc gọi nhóm đang diễn ra"
+        content.body = title + " — Mở Messenger để tham gia"
+        content.sound = .default
+        content.threadIdentifier = path
+        content.userInfo = ["mnConversationPath": path, "mnOngoingGroupCall": true]
+        let request = UNNotificationRequest(
+            identifier: "mn-group-call-" + UUID().uuidString,
+            content: content, trigger: nil
+        )
+        groupCallNotificationsRequested += 1
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            if let error {
+                DispatchQueue.main.async { self?.groupCallNotificationErrors += 1 }
+                NSLog("MN GROUP CALL: notification error %@", error.localizedDescription)
+            }
+        }
+        if !NSApp.isActive && caiDat("dockNayGoi", true) {
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+    }
+
+    private func showOngoingGroupCallPanel() {
+        guard let info = groupCallActive, caiDat("bangGoiNoi", true) else { return }
+        let panel = groupCallPanel ?? BangGoiDen()
+        groupCallPanel = panel
+        panel.configureAsOngoingGroupCall()
+        panel.tieuDe.stringValue = info.video
+            ? "🎥 Cuộc gọi video nhóm đang diễn ra" : "📞 Cuộc gọi nhóm đang diễn ra"
+        panel.chu.stringValue = info.title
+        panel.bam = { [weak self] action in
+            guard let self else { return }
+            self.groupCallPanel?.orderOut(nil)
+            if action == "Mở nhóm", let current = self.groupCallActive {
+                NSApp.activate(ignoringOtherApps: true)
+                if self.window.isMiniaturized { self.window.deminiaturize(nil) }
+                self.window.makeKeyAndOrderFront(nil)
+                let pathJS = self.jsonStringForJavaScript(current.path)
+                self.webView.evaluateJavaScript(
+                    "window.__mnNotificationNavigation ? window.__mnNotificationNavigation.open(" +
+                    pathJS + ") : 'navigation-module-missing'", completionHandler: nil)
+            }
+        }
+        if let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(
+                x: screen.maxX - panel.frame.width - 16,
+                y: screen.maxY - panel.frame.height - 12))
+        }
+        // Unlike 1-to-1 ringing dialogs, Messenger's group call card has no
+        // accept/decline modal; show this non-activating panel even foreground.
+        panel.orderFrontRegardless()
+        let path = info.path
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self, weak panel] in
+            guard self?.groupCallActive?.path == path else { return }
+            panel?.orderOut(nil)
+        }
+    }
+
+    private func showVerifiedIframeCallPanel() {
+        guard caiDat("bangGoiNoi", true) else { return }
+        let panel = callIframePanel ?? BangGoiDen()
+        callIframePanel = panel
+        panel.configureAsOngoingGroupCall(openTitle: "Mở Messenger")
+        panel.tieuDe.stringValue = "📞 Có cuộc gọi Messenger đến"
+        panel.chu.stringValue = "Mở Messenger để xem và trả lời cuộc gọi"
+        panel.bam = { [weak self] action in
+            guard let self else { return }
+            self.callIframePanel?.orderOut(nil)
+            if action == "Mở Messenger" {
+                NSApp.activate(ignoringOtherApps: true)
+                if self.window.isMiniaturized { self.window.deminiaturize(nil) }
+                self.window.makeKeyAndOrderFront(nil)
+            }
+        }
+        if let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(
+                x: screen.maxX - panel.frame.width - 16,
+                y: screen.maxY - panel.frame.height - 12))
+        }
+        panel.orderFrontRegardless()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak panel] in
+            panel?.orderOut(nil)
+        }
+    }
+
+    private func sendNativeIncomingCallNotification(source: String, isVideo: Bool? = nil) {
+        let content = UNMutableNotificationContent()
+        content.title = (isVideo == true) ? "Cuộc gọi video Messenger đến" : "Cuộc gọi Messenger đến"
+        content.body = "Mở Messenger Native để xem và trả lời cuộc gọi."
+        content.userInfo = ["mnIncomingCall": true]
+        // The native ringer is normally audible already. If it was blocked
+        // by a stale session, provide a short system alert sound as backup.
+        if !callRinger.isRinging { content.sound = .default }
+        let id = "mn-incoming-call-" + UUID().uuidString
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            if let error {
+                DispatchQueue.main.async { self?.callNativeNotificationErrors += 1 }
+                NSLog("MN CALL: native notification failed: %@", error.localizedDescription)
+            }
+        }
+        callFallbackNotifications += 1
+        if !NSApp.isActive && caiDat("dockNayGoi", true) {
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+        NSLog("MN CALL: native incoming call notification queued (%@)", source)
+    }
+
+    private func scheduleCallFallbackNotification(source: String) {
+        // Do not move the timer on repeated audio.play() events: only the
+        // first signal of a burst should arm a single fallback.
+        guard pendingCallFallback == nil else { return }
+        callFallbackCandidates += 1
+        let task = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingCallFallback = nil
+            // Normal dialog recognition has priority. A blocked ringtone
+            // MUST NOT prevent a fallback notification from being posted.
+            guard self.goiDen == nil else { return }
+            guard self.callAlertGate.fallbackNotification(at: Date()) else { return }
+            self.sendNativeIncomingCallNotification(source: source)
+        }
+        pendingCallFallback = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: task)
     }
 
     // App đang mở ở trước vẫn hiện thông báo (giống Messenger chính chủ)
@@ -1580,14 +1920,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     @objc func chanDoanCuocGoi() {
-        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}})"
+        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}, domMessageScanner: window.__mnNotificationEngineCallTest ? window.__mnNotificationEngineCallTest.status() : {available:false}, groupCall: window.__mnGroupCallDetector ? window.__mnGroupCallDetector.status() : {installed:false}})"
         webView.evaluateJavaScript(script) { value, error in
             let dialog = NSAlert()
             dialog.messageText = "Call Diagnostics"
             dialog.informativeText = """
             \(self.callRinger.status)
+            Raw WebKit call test mode: \(ProcessInfo.processInfo.environment["MN_RAW_WEB_CALL_TEST"] == "1")
             Active call windows: \(self.callWindowsByPath.count)
             Duplicate call popups blocked: \(self.duplicateCallPopupsBlocked)
+            Distinct fallback signals: \(self.callFallbackCandidates)
+            Native call notifications requested: \(self.callFallbackNotifications)
+            Native notification errors: \(self.callNativeNotificationErrors)
+            Embedded-frame probe ready events: \(self.callIframeReadyReports)
+            Embedded-frame verified call dialogs: \(self.callIframeVerifiedDialogs)
+            Embedded-frame ignored/untrusted events: \(self.callIframeIgnoredReports)
+            Embedded-frame call panel visible: \(self.callIframePanel?.isVisible ?? false)
+            New ongoing group call events: \(self.groupCallEvents)
+            Ended group call events: \(self.groupCallEndedEvents)
+            Group call banners requested: \(self.groupCallNotificationsRequested)
+            Group call banner errors: \(self.groupCallNotificationErrors)
+            Group call panel visible: \(self.groupCallPanel?.isVisible ?? false)
+            Group call floating panel setting enabled: \(self.caiDat("bangGoiNoi", true))
+            Fallback cancelled by dialog: \(self.callFallbackDismissedByDialog)
+            Audio signals: \(self.callAlertGate.ringtoneSignals)
+            Web notification call hints: \(self.callAlertGate.webCallSignals)
+            Call dialogs observed: \(self.callAlertGate.dialogSignals)
+            Dialog alerts: \(self.callAlertGate.dialogAlerts)
+            Fallback alerts: \(self.callAlertGate.fallbackAlerts)
+            Duplicate signals suppressed: \(self.callAlertGate.suppressed)
+            Pending fallback: \(self.pendingCallFallback != nil)
+            Main Messenger window currently visible: \(self.window.isVisible)
+            App currently active: \(NSApp.isActive)
+            Current WebView host: \(self.webView.url?.host ?? "unavailable")
+            Current WebView route family: \((self.webView.url?.path ?? "").hasPrefix("/messages") ? "/messages" : (self.webView.url?.path ?? "").hasPrefix("/t/") ? "/t/" : "other")
+            Main WebView loading: \(self.webView.isLoading)
 
             Audio bridge: \((value as? String) ?? "Unavailable: \(error?.localizedDescription ?? "unknown")")
 
@@ -1595,8 +1962,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             the duplicate may originate in Messenger's server-side history.
             """
             dialog.addButton(withTitle: "Đóng")
+            dialog.addButton(withTitle: "Thử banner")
+            dialog.addButton(withTitle: "Thử bảng nổi")
+            dialog.addButton(withTitle: "Bật/tắt quét tin (A/B)")
             NSApp.activate(ignoringOtherApps: true)
-            dialog.runModal()
+            switch dialog.runModal() {
+            case .alertSecondButtonReturn:
+                self.thuBannerCuocGoi()
+            case .alertThirdButtonReturn:
+                self.thuBangNoiCuocGoi()
+            case NSApplication.ModalResponse(rawValue: 1003):
+                self.doiTrangThaiBoQuetTinThuNghiem()
+            default:
+                break
+            }
+        }
+    }
+
+    private func doiTrangThaiBoQuetTinThuNghiem() {
+        // In-page toggle, limited to DOM message fallback notifications.
+        // No reload, app restart, data deletion or persistent settings.
+        let js = """
+        (() => {
+          const control = window.__mnNotificationEngineCallTest;
+          if (!control) return 'Không có công cụ A/B trong trang hiện tại';
+          const before = control.status();
+          const result = control.setPaused(!before.paused);
+          return result.paused ? 'ĐÃ TẠM DỪNG quét DOM tin nhắn'
+                               : 'ĐÃ BẬT LẠI quét DOM tin nhắn (baseline mới)';
+        })()
+        """
+        webView.evaluateJavaScript(js) { value, error in
+            let alert = NSAlert()
+            alert.messageText = "Thử nghiệm A/B cuộc gọi"
+            alert.informativeText = (value as? String)
+                ?? "Không thể đổi chế độ: \(error?.localizedDescription ?? "unknown")"
+            alert.informativeText += """
+
+            Chỉ bộ quét tin nhắn DOM bị tạm dừng. Web Notification, cuộc gọi
+            và lịch sử đăng nhập không thay đổi. Khi tạm dừng, có thể bỏ lỡ
+            thông báo tin nhắn do bộ quét DOM tạo ra. Mở lại Call Diagnostics
+            và bấm nút này một lần nữa để bật lại.
+            Tải lại trang hoặc khởi động ứng dụng sẽ tự khôi phục chế độ thường.
+            """
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
+    private func thuBannerCuocGoi() {
+        let content = UNMutableNotificationContent()
+        content.title = "TEST — Messenger Native"
+        content.body = "Thử banner cuộc gọi. Đây không phải cuộc gọi thật."
+        content.sound = .default
+        content.userInfo = ["mnCallUiTest": true]
+        let request = UNNotificationRequest(
+            identifier: "mn-call-ui-test-" + UUID().uuidString,
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("MN CALL TEST: banner failed: %@", error.localizedDescription)
+            } else {
+                NSLog("MN CALL TEST: test banner submitted")
+            }
+        }
+    }
+
+    private func thuBangNoiCuocGoi() {
+        // Standalone visual test: never set goiDen, play a ringtone, invoke
+        // __vmBamGoiDen or interact with a live conversation.
+        guard goiDen == nil else { return }
+        let preview = BangGoiDen()
+        preview.tieuDe.stringValue = "THỬ NGHIỆM — không phải cuộc gọi"
+        preview.chu.stringValue = "Kiểm tra bảng nổi Messenger"
+        preview.bam = { [weak preview] _ in preview?.orderOut(nil) }
+        let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+        if let screen {
+            preview.setFrameOrigin(NSPoint(
+                x: screen.maxX - preview.frame.width - 16,
+                y: screen.maxY - preview.frame.height - 12))
+        }
+        preview.orderFrontRegardless()
+        NSLog("MN CALL TEST: floating call panel shown")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            preview.orderOut(nil)
         }
     }
 
@@ -1746,6 +2198,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 final class BangGoiDen: NSPanel {
     let anh = NSImageView(), chu = NSTextField(labelWithString: ""), tieuDe = NSTextField(labelWithString: "")
     var bam: ((String) -> Void)?
+    private var actionButtons: [NSButton] = []
+    func configureAsOngoingGroupCall(openTitle: String = "Mở nhóm") {
+        for (index, text) in ["Bỏ qua", openTitle].enumerated() {
+            guard index < actionButtons.count else { continue }
+            actionButtons[index].title = text
+            actionButtons[index].attributedTitle = NSAttributedString(
+                string: text,
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 14, weight: .semibold)
+                ])
+        }
+    }
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 360, height: 132),
                    styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -1775,6 +2240,7 @@ final class BangGoiDen: NSPanel {
                                                                              .font: NSFont.systemFont(ofSize: 14, weight: .semibold)])
             b.frame = NSRect(x: 16 + CGFloat(i) * 168, y: 12, width: 160, height: 32)
             nen.addSubview(b)
+            actionButtons.append(b)
         }
         contentView = nen
     }

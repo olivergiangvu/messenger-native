@@ -43,10 +43,19 @@ function harness(pathname, mediaSession = null) {
   assert.equal(main.originalPlays, 0, 'Web incoming ringtone must not reach WKWebView playback');
   assert.equal(main.messages.length, 1);
   assert.equal(main.messages[0].amChuongGoiDen, true);
+  assert.equal(main.messages[0].audioElementToken, 'audio-1');
+  await ringtone.play();
+  assert.equal(main.messages[1].audioElementToken, 'audio-1',
+    'the same HTMLAudioElement must keep a stable session token');
+  const anotherCallAudio = new main.AudioMedia('AUDIO', 'https://static.xx.fbcdn.net/taJw7SpZVz2.mp3');
+  await anotherCallAudio.play();
+  assert.equal(main.messages[2].audioElementToken, 'audio-2',
+    'a fresh incoming audio element should identify a new candidate');
+
 
   const mainStatus = main.window.__mnCallAudioStatus();
   assert.equal(mainStatus.mediaSessionAvailable, false);
-  assert.equal(mainStatus.suppressedWebRingtones, 1);
+  assert.equal(mainStatus.suppressedWebRingtones, 3);
   const voice = new main.AudioMedia('AUDIO', 'https://example.com/voice-message.ogg');
   const video = new main.AudioMedia('VIDEO', 'https://example.com/video.mp4');
   await voice.play();
@@ -54,8 +63,9 @@ function harness(pathname, mediaSession = null) {
   assert.equal(main.originalPlays, 2, 'Voice/video playback must remain untouched');
 
   const manual = main.window.__mnStopIncomingRingtone();
-  assert.equal(manual, 1, 'Emergency stop must target ringtone only');
+  assert.equal(manual, 2, 'Emergency stop must target both ringtone audio elements only');
   assert.equal(ringtone.paused, true);
+  assert.equal(anotherCallAudio.paused, true);
   assert.equal(voice.paused, false);
   assert.equal(video.paused, false);
 
