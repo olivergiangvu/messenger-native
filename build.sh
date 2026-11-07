@@ -21,6 +21,7 @@ cp "$GOC/reel-preview.js" "$APP/Contents/Resources/reel-preview.js"
 cp "$GOC/notification-engine.js" "$APP/Contents/Resources/notification-engine.js"
 cp "$GOC/notification-navigation.js" "$APP/Contents/Resources/notification-navigation.js"
 cp "$GOC/incoming-call-audio.js" "$APP/Contents/Resources/incoming-call-audio.js"
+cp "$GOC/incoming-call-frame-probe.js" "$APP/Contents/Resources/incoming-call-frame-probe.js"
 cp "$GOC/incoming-group-call.js" "$APP/Contents/Resources/incoming-group-call.js"
 # Native menu and permission localization resources. Must be inside the .app
 # BEFORE codesigning, or changing them would invalidate the app signature.
