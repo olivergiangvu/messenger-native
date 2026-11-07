@@ -540,6 +540,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var goiDen: (chu: String, anh: String, video: Bool, nhom: Bool)?
     var choLuu: [() -> Void] = []                            // hộp "Lưu vào đâu" đang chờ (tải nhiều file cùng lúc)          // hộp "Cuộc gọi đến" đang hiện trên trang
     var bangGoi: BangGoiDen?                         // bảng nổi báo cuộc gọi đến
+    private var groupCallActive: (path: String, title: String, video: Bool)?
+    private var groupCallPanel: BangGoiDen?
+    private var groupCallLastShown: [String: Date] = [:]
+    private(set) var groupCallEvents = 0
+    private(set) var groupCallEndedEvents = 0
+    private(set) var groupCallNotificationsRequested = 0
+    private(set) var groupCallNotificationErrors = 0
     var taiVe: [ObjectIdentifier: URL] = [:]       // file đang tải → nơi lưu
     var dangTai: [WKDownload] = []                  // giữ lượt tải (không giữ → bị huỷ giữa chừng, thử 03/11)
     var pip: [ObjectIdentifier: TrangThaiPiP] = [:]  // cửa sổ cuộc gọi → trạng thái PiP
@@ -614,6 +621,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSLog("MN CALL: native ringtone bridge injected")
         } else {
             NSLog("MN CALL ERROR: missing incoming-call-audio.js")
+        }
+        // Group call availability is a different event from ringing one-to-one
+        // calls. Keep its event detection independent of the optional message
+        // DOM scanner A/B diagnostic.
+        if let groupURL = Bundle.main.url(forResource: "incoming-group-call", withExtension: "js"),
+           let groupScript = try? String(contentsOf: groupURL, encoding: .utf8) {
+            cauHinh.userContentController.addUserScript(
+                WKUserScript(source: groupScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            NSLog("MN GROUP CALL: joinable call detector injected")
+        } else {
+            NSLog("MN GROUP CALL ERROR: missing incoming-group-call.js")
         }
         if let engineURL = Bundle.main.url(forResource: "notification-engine", withExtension: "js"),
            let engine = try? String(contentsOf: engineURL, encoding: .utf8) {
@@ -732,6 +750,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             callRinger.incomingDialogVisible(sessionID: session)
             return
         }
+        if let hint = d["mnGroupCallStarted"] as? [String: Any], message.webView == webView {
+            let path = hint["path"] as? String ?? ""
+            guard NotificationDeepLink.url(forPath: path) != nil else { return }
+            groupCallEvents += 1
+            let now = Date()
+            if groupCallActive?.path == path { return }
+            if let previous = groupCallLastShown[path], now.timeIntervalSince(previous) < 60 { return }
+            groupCallLastShown[path] = now
+            if groupCallLastShown.count > 50 {
+                groupCallLastShown = groupCallLastShown.filter { now.timeIntervalSince($0.value) < 15 * 60 }
+            }
+            let title = String((hint["title"] as? String ?? "Cuộc trò chuyện nhóm").prefix(100))
+            groupCallActive = (path: path, title: title, video: hint["video"] as? Bool ?? false)
+            showOngoingGroupCallPanel()
+            sendOngoingGroupCallBanner(path: path, title: title)
+            return
+        }
+        if let ended = d["mnGroupCallEnded"] as? String, message.webView == webView {
+            groupCallEndedEvents += 1
+            if groupCallActive?.path == ended {
+                groupCallPanel?.orderOut(nil)
+                groupCallActive = nil
+            }
+            return
+        }
         if let g = d["goiDenHien"] as? [String: Any], message.webView == webView {
             cancelCallFallbackNotification(dialogConfirmed: true)
             let sessionID = g["phien"] as? String ?? ""
@@ -787,6 +830,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if dialogConfirmed { callFallbackDismissedByDialog += 1 }
             pendingCallFallback?.cancel()
             pendingCallFallback = nil
+        }
+    }
+
+    private func sendOngoingGroupCallBanner(path: String, title: String) {
+        guard NotificationDeepLink.url(forPath: path) != nil else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Cuộc gọi nhóm đang diễn ra"
+        content.body = title + " — Mở Messenger để tham gia"
+        content.sound = .default
+        content.threadIdentifier = path
+        content.userInfo = ["mnConversationPath": path, "mnOngoingGroupCall": true]
+        let request = UNNotificationRequest(
+            identifier: "mn-group-call-" + UUID().uuidString,
+            content: content, trigger: nil
+        )
+        groupCallNotificationsRequested += 1
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            if let error {
+                DispatchQueue.main.async { self?.groupCallNotificationErrors += 1 }
+                NSLog("MN GROUP CALL: notification error %@", error.localizedDescription)
+            }
+        }
+        if !NSApp.isActive && caiDat("dockNayGoi", true) {
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+    }
+
+    private func showOngoingGroupCallPanel() {
+        guard let info = groupCallActive, caiDat("bangGoiNoi", true) else { return }
+        let panel = groupCallPanel ?? BangGoiDen()
+        groupCallPanel = panel
+        panel.configureAsOngoingGroupCall()
+        panel.tieuDe.stringValue = info.video
+            ? "🎥 Cuộc gọi video nhóm đang diễn ra" : "📞 Cuộc gọi nhóm đang diễn ra"
+        panel.chu.stringValue = info.title
+        panel.bam = { [weak self] action in
+            guard let self else { return }
+            self.groupCallPanel?.orderOut(nil)
+            if action == "Mở nhóm", let current = self.groupCallActive {
+                NSApp.activate(ignoringOtherApps: true)
+                if self.window.isMiniaturized { self.window.deminiaturize(nil) }
+                self.window.makeKeyAndOrderFront(nil)
+                let pathJS = self.jsonStringForJavaScript(current.path)
+                self.webView.evaluateJavaScript(
+                    "window.__mnNotificationNavigation ? window.__mnNotificationNavigation.open(" +
+                    pathJS + ") : 'navigation-module-missing'", completionHandler: nil)
+            }
+        }
+        if let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(
+                x: screen.maxX - panel.frame.width - 16,
+                y: screen.maxY - panel.frame.height - 12))
+        }
+        // Unlike 1-to-1 ringing dialogs, Messenger's group call card has no
+        // accept/decline modal; show this non-activating panel even foreground.
+        panel.orderFrontRegardless()
+        let path = info.path
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self, weak panel] in
+            guard self?.groupCallActive?.path == path else { return }
+            panel?.orderOut(nil)
         }
     }
 
@@ -1733,7 +1836,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     @objc func chanDoanCuocGoi() {
-        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}, domMessageScanner: window.__mnNotificationEngineCallTest ? window.__mnNotificationEngineCallTest.status() : {available:false}})"
+        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}, domMessageScanner: window.__mnNotificationEngineCallTest ? window.__mnNotificationEngineCallTest.status() : {available:false}, groupCall: window.__mnGroupCallDetector ? window.__mnGroupCallDetector.status() : {installed:false}})"
         webView.evaluateJavaScript(script) { value, error in
             let dialog = NSAlert()
             dialog.messageText = "Call Diagnostics"
@@ -1744,6 +1847,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             Distinct fallback signals: \(self.callFallbackCandidates)
             Native call notifications requested: \(self.callFallbackNotifications)
             Native notification errors: \(self.callNativeNotificationErrors)
+            New ongoing group call events: \(self.groupCallEvents)
+            Ended group call events: \(self.groupCallEndedEvents)
+            Group call banners requested: \(self.groupCallNotificationsRequested)
+            Group call banner errors: \(self.groupCallNotificationErrors)
+            Group call panel visible: \(self.groupCallPanel?.isVisible ?? false)
             Fallback cancelled by dialog: \(self.callFallbackDismissedByDialog)
             Audio signals: \(self.callAlertGate.ringtoneSignals)
             Web notification call hints: \(self.callAlertGate.webCallSignals)
@@ -2000,6 +2108,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 final class BangGoiDen: NSPanel {
     let anh = NSImageView(), chu = NSTextField(labelWithString: ""), tieuDe = NSTextField(labelWithString: "")
     var bam: ((String) -> Void)?
+    private var actionButtons: [NSButton] = []
+    func configureAsOngoingGroupCall() {
+        for (index, text) in ["Bỏ qua", "Mở nhóm"].enumerated() {
+            guard index < actionButtons.count else { continue }
+            actionButtons[index].attributedTitle = NSAttributedString(
+                string: text,
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 14, weight: .semibold)
+                ])
+        }
+    }
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 360, height: 132),
                    styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -2029,6 +2149,7 @@ final class BangGoiDen: NSPanel {
                                                                              .font: NSFont.systemFont(ofSize: 14, weight: .semibold)])
             b.frame = NSRect(x: 16 + CGFloat(i) * 168, y: 12, width: 160, height: 32)
             nen.addSubview(b)
+            actionButtons.append(b)
         }
         contentView = nen
     }
