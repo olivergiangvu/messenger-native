@@ -58,6 +58,7 @@ jobs:
           node Tests/CallDiagnosticsUiTests.cjs
           node Tests/IncomingGroupCallTests.cjs
           node Tests/IncomingCallFrameProbeTests.cjs
+          node Tests/RawWebCallModeTests.cjs
           node Tests/MenuLocalizationTests.cjs
           node Tests/InterfaceLocalizationTests.cjs
       - name: Validate macOS localization resources
