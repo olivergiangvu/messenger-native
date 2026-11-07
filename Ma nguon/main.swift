@@ -280,11 +280,14 @@ let jsThongBao = """
   let hopCu = '', kieuGoi = 'thoai', hopMatLuc = 0, lanNhipGoi = 0;
   let phienGoi = '', soPhienGoi = 0;
   let soLanQuetGoi = 0, soQuetTuObserver = 0, ganObserverGoi = false, henQuetGoi = false;
+  let soLanTimThayHopGoi = 0, soLanBaoSwiftGoi = 0, soLanBaoSwiftGac = 0, hopGoiGanNhatLuc = 0;
   const quetHopGoi = () => tinhTon('hộp gọi', () => {
     soLanQuetGoi++;
     const nut = nutGoiDen('Chấp nhận') || nutGoiDen('Accept');
     const hop = nut ? hopGoiTuNut(nut) : null;
     if (hop) {
+      soLanTimThayHopGoi++;
+      hopGoiGanNhatLuc = Date.now();
       hopMatLuc = 0;
       const nay = Date.now();
       // Stable opaque token per detected call dialog. Do not transmit names.
@@ -315,7 +318,9 @@ let jsThongBao = """
             ', chữ=' + JSON.stringify(cheTen) + ', hìnhNút=' + ve + ' → gọi ' + kieuGoi + (laNhom ? ' NHÓM' : '') });
         }
         if (laNhom) guiSwift({ nhatKy: 'DÒ TB: gọi nhóm – tên nhóm ' + (tenNhom ? 'đã tìm thấy (' + tenNhom.length + ' ký tự)' : 'CHƯA thấy') });
-        hopCu = khoa; guiSwift({ goiDenHien: { chu, anh, video: kieuGoi === 'video', nhom: laNhom, phien: phienGoi } });
+        hopCu = khoa;
+        soLanBaoSwiftGoi++;
+        guiSwift({ goiDenHien: { chu, anh, video: kieuGoi === 'video', nhom: laNhom, phien: phienGoi } });
       }
     } else if (hopCu) {
       // Messenger may re-render the incoming-call modal temporarily. Debounce
@@ -326,6 +331,7 @@ let jsThongBao = """
         hopMatLuc = 0;
         phienGoi = '';
         window.__vmGoiLuc = Date.now();
+        soLanBaoSwiftGac++;
         guiSwift({ goiDenAn: true });
       }
     }
@@ -395,6 +401,11 @@ let jsThongBao = """
       scans: soLanQuetGoi,
       observerScans: soQuetTuObserver,
       incomingDialogActive: !!hopCu,
+      liveDialogScanHits: soLanTimThayHopGoi,
+      incomingBridgeReports: soLanBaoSwiftGoi,
+      endedBridgeReports: soLanBaoSwiftGac,
+      secondsSinceLastIncomingDialog: hopGoiGanNhatLuc
+        ? Math.round((Date.now() - hopGoiGanNhatLuc) / 1000) : null,
       openDialogElements: document.querySelectorAll('[role="dialog"],[role="alertdialog"]').length,
       acceptOrAnswerButtons: labels.filter(e => nhanChapNhanGoi.test(nhanNut(e))).length,
       declineButtons: labels.filter(e => nhanTuChoiGoi.test(nhanNut(e))).length,
@@ -1722,7 +1733,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     @objc func chanDoanCuocGoi() {
-        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}})"
+        let script = "JSON.stringify({audio: window.__mnCallAudioStatus ? window.__mnCallAudioStatus() : {installed:false}, detection: window.__mnCallDetectionStatus ? window.__mnCallDetectionStatus() : {installed:false}, domMessageScanner: window.__mnNotificationEngineCallTest ? window.__mnNotificationEngineCallTest.status() : {available:false}})"
         webView.evaluateJavaScript(script) { value, error in
             let dialog = NSAlert()
             dialog.messageText = "Call Diagnostics"
@@ -1755,15 +1766,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             dialog.addButton(withTitle: "Đóng")
             dialog.addButton(withTitle: "Thử banner")
             dialog.addButton(withTitle: "Thử bảng nổi")
+            dialog.addButton(withTitle: "Bật/tắt quét tin (A/B)")
             NSApp.activate(ignoringOtherApps: true)
             switch dialog.runModal() {
             case .alertSecondButtonReturn:
                 self.thuBannerCuocGoi()
             case .alertThirdButtonReturn:
                 self.thuBangNoiCuocGoi()
+            case NSApplication.ModalResponse(rawValue: 1003):
+                self.doiTrangThaiBoQuetTinThuNghiem()
             default:
                 break
             }
+        }
+    }
+
+    private func doiTrangThaiBoQuetTinThuNghiem() {
+        // In-page toggle, limited to DOM message fallback notifications.
+        // No reload, app restart, data deletion or persistent settings.
+        let js = """
+        (() => {
+          const control = window.__mnNotificationEngineCallTest;
+          if (!control) return 'Không có công cụ A/B trong trang hiện tại';
+          const before = control.status();
+          const result = control.setPaused(!before.paused);
+          return result.paused ? 'ĐÃ TẠM DỪNG quét DOM tin nhắn'
+                               : 'ĐÃ BẬT LẠI quét DOM tin nhắn (baseline mới)';
+        })()
+        """
+        webView.evaluateJavaScript(js) { value, error in
+            let alert = NSAlert()
+            alert.messageText = "Thử nghiệm A/B cuộc gọi"
+            alert.informativeText = (value as? String)
+                ?? "Không thể đổi chế độ: \\(error?.localizedDescription ?? "unknown")"
+            alert.informativeText += """
+
+            Chỉ bộ quét tin nhắn DOM bị tạm dừng. Web Notification, cuộc gọi
+            và lịch sử đăng nhập không thay đổi. Khi tạm dừng, có thể bỏ lỡ
+            thông báo tin nhắn do bộ quét DOM tạo ra. Mở lại Call Diagnostics
+            và bấm nút này một lần nữa để bật lại.
+            Tải lại trang hoặc khởi động ứng dụng sẽ tự khôi phục chế độ thường.
+            """
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
         }
     }
 
