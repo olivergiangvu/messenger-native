@@ -51,6 +51,10 @@
   // outgoing-preview fingerprint, which can be consumed by one scan.
   // Content never leaves this page; no body, hash or length enters logs.
   const unsentLocalDrafts = new Map();
+  // Editor nodes can linger across SPA chat switches. Never interpret the
+  // former conversation's focused editor as a draft in the new thread.
+  let lastEditorElement = null;
+  let lastEditorPath = '';
   const LOCAL_DRAFT_TTL_MS = 10 * 60 * 1000;
   const LOCAL_TEXT_TTL_MS = 12000;
   const LOCAL_SENT_TTL_MS = 90000;
@@ -131,15 +135,19 @@
   // Read at most a few candidate editors; never enumerate message bubbles.
   function liveComposerDraft(path) {
     if (!currentlySelected(path)) return '';
+    const trustworthy = editor => !!editor &&
+      editor.isConnected !== false &&
+      !(editor === lastEditorElement && lastEditorPath !== path);
     const focused = composerFor(document.activeElement);
-    if (focused) return composerText(focused);
+    if (trustworthy(focused)) return composerText(focused);
     if (typeof document.querySelectorAll !== 'function') return '';
     const editors = Array.from(document.querySelectorAll(
       '[contenteditable="true"], textarea'
     )).slice(0, 8);
     for (const editor of editors) {
-      if (composerFor(editor)) {
-        const text = composerText(editor);
+      const local = composerFor(editor);
+      if (trustworthy(local)) {
+        const text = composerText(local);
         if (text) return text;
       }
     }
@@ -168,6 +176,8 @@
       return;
     }
     if (isDraftPreview(text)) return;
+    lastEditorElement = editor;
+    lastEditorPath = path;
     if (sendIntent) unsentLocalDrafts.delete(path);
     else {
       unsentLocalDrafts.delete(path);
