@@ -55,6 +55,7 @@
   // former conversation's focused editor as a draft in the new thread.
   let lastEditorElement = null;
   let lastEditorPath = '';
+  let lastEditorWasSubmitted = false;
   const LOCAL_DRAFT_TTL_MS = 10 * 60 * 1000;
   const LOCAL_TEXT_TTL_MS = 12000;
   const LOCAL_SENT_TTL_MS = 90000;
@@ -137,7 +138,8 @@
     if (!currentlySelected(path)) return '';
     const trustworthy = editor => !!editor &&
       editor.isConnected !== false &&
-      !(editor === lastEditorElement && lastEditorPath !== path);
+      !(editor === lastEditorElement &&
+        (lastEditorPath !== path || lastEditorWasSubmitted));
     const focused = composerFor(document.activeElement);
     if (trustworthy(focused)) return composerText(focused);
     if (typeof document.querySelectorAll !== 'function') return '';
@@ -178,6 +180,7 @@
     if (isDraftPreview(text)) return;
     lastEditorElement = editor;
     lastEditorPath = path;
+    lastEditorWasSubmitted = !!sendIntent;
     if (sendIntent) unsentLocalDrafts.delete(path);
     else {
       unsentLocalDrafts.delete(path);
