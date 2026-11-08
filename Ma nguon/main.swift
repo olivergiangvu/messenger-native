@@ -66,6 +66,11 @@ let jsThongBao = """
       // Original page callbacks are short-lived; notification taps also carry
       // a stable conversation path in native UNNotificationContent.userInfo.
       setTimeout(() => { delete danhSach[this._id]; }, 15 * 60 * 1000);
+      // Some Messenger revisions emit a Web Notification even when the
+      // current user sends the message. Match only recent explicit local
+      // sends in the JS page memory; do not ship composer text to Swift.
+      if (window.__mnIsOwnSentNotification &&
+          window.__mnIsOwnSentNotification(this.body, this.tag)) return;
       guiSwift({ id: this._id, tieuDe: this.title, noiDung: this.body,
                  tag: this.tag, duongDan: this.tag, nguon: 'web' });
     }
