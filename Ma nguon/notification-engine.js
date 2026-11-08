@@ -42,8 +42,29 @@
   let relativeTimeChangesBlocked = 0;
   let inlineTimestampsRemoved = 0;
   const recentLocalText = new Map();
+  // Keep only fingerprints of messages explicitly submitted by the user.
+  // A sent preview can arrive well after the original 12s typing window,
+  // or reappear when Messenger redraws a conversation row. All raw text
+  // stays in this page's memory and is NEVER posted to Swift or logs.
+  const recentLocalSends = new Map();
+  // Unsent drafts are NOT messages. Keep them independently of the old 12s
+  // outgoing-preview fingerprint, which can be consumed by one scan.
+  // Content never leaves this page; no body, hash or length enters logs.
+  const unsentLocalDrafts = new Map();
+  // Editor nodes can linger across SPA chat switches. Never interpret the
+  // former conversation's focused editor as a draft in the new thread.
+  let lastEditorElement = null;
+  let lastEditorPath = '';
+  let lastEditorWasSubmitted = false;
+  const LOCAL_DRAFT_TTL_MS = 10 * 60 * 1000;
   const LOCAL_TEXT_TTL_MS = 12000;
+  const LOCAL_SENT_TTL_MS = 90000;
   const MAX_LOCAL_TEXTS = 8;
+  const MAX_SENT_PER_THREAD = 4;
+  let outgoingWebSuppressed = 0;
+  let draftLabelSkipped = 0;
+  let draftComposerSkipped = 0;
+  let draftWebSuppressed = 0;
 
   const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   const metadata = (text) => /^(?:\d+\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|s|m|h|d|w)\s*(?:trước|ago)?|just now|vừa xong|active now|đang hoạt động|·)$/i.test(text);
@@ -62,7 +83,11 @@
   // composer draft ("Draft: …", "Bản nháp: …"). This is a UI-state
   // change, NOT a new incoming message. Check the prefix before parsing
   // group sender labels; otherwise a group can mistakenly become "Draft".
-  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)\s*[:：]\s*/i;
+  // Messenger may render the draft marker as "Draft: …", "Draft · …",
+  // "Nháp — …" or as a standalone UI line above the draft. Do not treat
+  // words such as "Drafting" as a marker.
+  const draftPrefix = /^(?:draft|bản\s+nháp|nháp)(?:\s*[:：·—–-]\s*|\s*$)/i;
+  const draftLabel = /^(?:draft|bản\s+nháp|nháp)\s*[:：·—–-]?\s*$/i;
   const isDraftPreview = preview => draftPrefix.test(normalize(preview));
 
   // A selected conversation can be marked READ immediately. Its sidebar
@@ -87,38 +112,154 @@
       editor.textContent)) || '').slice(0, 500);
   }
 
+  // Normalize optional first-person rendering in the sidebar. Do not erase
+  // arbitrary sender names: they are not proof of an outgoing message.
+  const withoutOwnPrefix = text =>
+    normalize(text).replace(/^(?:you|bạn)\s*[:：·]\s*/i, '');
+
+  function matchesOutgoing(preview, actual) {
+    const visible = withoutOwnPrefix(preview);
+    return visible === actual ||
+      (visible.endsWith('…') && visible.length >= 16 &&
+       actual.startsWith(visible.slice(0, -1)));
+  }
+
+  function matchesDraft(preview, actual) {
+    const plain = normalize(preview);
+    return matchesOutgoing(plain, actual) ||
+      (isDraftPreview(plain) &&
+       matchesOutgoing(plain.replace(draftPrefix, ''), actual));
+  }
+
+  // Prefer a live, visible composer when available. This also catches
+  // restored drafts and IME/autofill changes that bypass an 'input' event.
+  // Read at most a few candidate editors; never enumerate message bubbles.
+  function liveComposerDraft(path) {
+    if (!currentlySelected(path)) return '';
+    const trustworthy = editor => !!editor &&
+      editor.isConnected !== false &&
+      !(editor === lastEditorElement &&
+        (lastEditorPath !== path || lastEditorWasSubmitted));
+    const focused = composerFor(document.activeElement);
+    if (trustworthy(focused)) return composerText(focused);
+    if (typeof document.querySelectorAll !== 'function') return '';
+    const editors = Array.from(document.querySelectorAll(
+      '[contenteditable="true"], textarea'
+    )).slice(0, 8);
+    for (const editor of editors) {
+      const local = composerFor(editor);
+      if (trustworthy(local)) {
+        const text = composerText(local);
+        if (text) return text;
+      }
+    }
+    return '';
+  }
+
+  function matchesUnsentDraft(path, preview) {
+    const normalized = normalizedPath(path);
+    const live = liveComposerDraft(normalized);
+    if (live && matchesDraft(preview, live)) return true;
+    const candidate = unsentLocalDrafts.get(normalized);
+    if (!candidate) return false;
+    if (Date.now() - candidate.timestamp > LOCAL_DRAFT_TTL_MS) {
+      unsentLocalDrafts.delete(normalized);
+      return false;
+    }
+    return matchesDraft(preview, candidate.text);
+  }
+
   function rememberLocalText(editor, sendIntent) {
     const text = composerText(editor);
-    if (!text || isDraftPreview(text)) return;
     const path = normalizedPath(location.pathname);
+    if (!text) {
+      recentLocalText.delete(path);
+      unsentLocalDrafts.delete(path);
+      return;
+    }
+    if (isDraftPreview(text)) return;
+    lastEditorElement = editor;
+    lastEditorPath = path;
+    lastEditorWasSubmitted = !!sendIntent;
+    if (sendIntent) unsentLocalDrafts.delete(path);
+    else {
+      unsentLocalDrafts.delete(path);
+      unsentLocalDrafts.set(path, { text, timestamp: Date.now() });
+      while (unsentLocalDrafts.size > MAX_LOCAL_TEXTS) {
+        unsentLocalDrafts.delete(unsentLocalDrafts.keys().next().value);
+      }
+    }
     const previous = recentLocalText.get(path);
     const timestamp = Date.now();
-    // A send action refreshes the same candidate; regular input overwrites it.
     recentLocalText.delete(path);
     recentLocalText.set(path, {
       text, timestamp, sendIntent: !!sendIntent || !!(
         previous && previous.text === text && previous.sendIntent
       ), consumed: false
     });
+    if (sendIntent) {
+      const history = (recentLocalSends.get(path) || []).filter(item =>
+        timestamp - item.timestamp < LOCAL_SENT_TTL_MS
+      );
+      history.push({ text, timestamp });
+      recentLocalSends.delete(path);
+      recentLocalSends.set(path, history.slice(-MAX_SENT_PER_THREAD));
+      while (recentLocalSends.size > MAX_LOCAL_TEXTS) {
+        recentLocalSends.delete(recentLocalSends.keys().next().value);
+      }
+    }
     while (recentLocalText.size > MAX_LOCAL_TEXTS) {
       recentLocalText.delete(recentLocalText.keys().next().value);
     }
   }
 
   function recentLocalMatch(item) {
-    const candidate = recentLocalText.get(normalizedPath(item.path));
+    const path = normalizedPath(item.path);
+    const now = Date.now();
+    const history = (recentLocalSends.get(path) || []).filter(sent =>
+      now - sent.timestamp <= LOCAL_SENT_TTL_MS
+    );
+    if (history.length) recentLocalSends.set(path, history);
+    else recentLocalSends.delete(path);
+    if (history.some(sent => matchesOutgoing(item.preview, sent.text))) return true;
+
+    // Typing-only fingerprint protects very short optimistic DOM changes,
+    // but is never allowed to hide later inbound messages.
+    const candidate = recentLocalText.get(path);
     if (!candidate || candidate.consumed ||
-        Date.now() - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
-    const visible = normalize(item.preview);
-    const actual = candidate.text;
-    // Messenger sometimes prepends sender status without its "You:" label;
-    // the check is exact, or a sufficiently long visibly truncated prefix.
-    const matched = visible === actual ||
-      (visible.endsWith('…') && visible.length >= 16 &&
-       actual.startsWith(visible.slice(0, -1)));
+        now - candidate.timestamp > LOCAL_TEXT_TTL_MS) return false;
+    const matched = matchesOutgoing(item.preview, candidate.text);
     if (matched) candidate.consumed = true;
     return matched;
   }
+
+  // The page's Web Notification API is a second, independent notification
+  // source. Suppress only EXACT content matching a recent explicit local Send.
+  // A missing Web tag is allowed only in a narrow 10s interval in the open chat.
+  window.__mnIsOwnSentNotification = (body, tag) => {
+    const tagPath = normalizedPath(tag);
+    const selected = normalizedPath(location.pathname);
+    const path = /^\/t\/[^/]+/.test(tagPath) ? tagPath : selected;
+    if (!/^\/t\/[^/]+/.test(path)) return false;
+
+    const now = Date.now();
+    const maxAge = tagPath === path ? LOCAL_SENT_TTL_MS : 10000;
+    const sent = (recentLocalSends.get(path) || []).some(item =>
+      now - item.timestamp <= maxAge && matchesOutgoing(body, item.text)
+    );
+    if (sent) {
+      outgoingWebSuppressed += 1;
+      return true;
+    }
+    // The editor can still contain the sent text for a React render tick.
+    // Explicit Send evidence takes precedence over unsent composer state.
+    // Never suppress another chat's Web Notification by global focus alone.
+    if (matchesUnsentDraft(path, body) && (tagPath === path || selected === path)) {
+      draftWebSuppressed += 1;
+      return true;
+    }
+    return false;
+  };
 
   document.addEventListener('input', event => {
     const editor = composerFor(event.target);
@@ -309,7 +450,11 @@
       preview = age.content;
       inlineTimestampsRemoved += 1;
     }
-    const isDraft = isDraftPreview(preview);
+    // A standalone "Draft" accessibility/text line is normalized into
+    // "Draft message" by the sidebar text parser; catch it BEFORE flattening
+    // the rest of the row into a message body.
+    const isDraft = isDraftPreview(preview) ||
+      parts.slice(1).some(part => draftLabel.test(part));
 
     // A sender prefix is reliably extracted only when Messenger shows it.
     // Never claim that the sender was determined when it wasn't visible.
@@ -458,14 +603,24 @@
       const eligible = previewChanged;
       if (!old && item.unread) staleCandidatesBlocked += 1;
       // Do not consume a local-send fingerprint during a no-change scan.
+      // A send can complete before React clears the contenteditable editor;
+      // it must be classified as sent, not as an unsent draft.
       const sentFromLocalComposer = eligible && !item.isDraft &&
-        !submittedLocalDraft && selected && recentLocalMatch(item);
+        !submittedLocalDraft && recentLocalMatch(item);
+      const unsentDraft = eligible && !item.isDraft &&
+        !submittedLocalDraft && !sentFromLocalComposer &&
+        matchesUnsentDraft(item.path, item.preview);
       if (eligible && (item.unread || activeIncoming)) {
         if (item.isDraft) {
-          // The visible preview changed because the user typed into the
-          // composer; it does not represent an inbound server message.
+          // Explicit UI draft marker, never an inbound message.
           draftSkipped += 1;
+          draftLabelSkipped += 1;
           lastEvent = 'draft-change-suppressed';
+        } else if (unsentDraft) {
+          // Unlabelled draft matches an actual unsent local composer.
+          draftSkipped += 1;
+          draftComposerSkipped += 1;
+          lastEvent = 'draft-composer-suppressed';
         } else if (submittedLocalDraft) {
           draftSkipped += 1;
           lastEvent = 'draft-send-suppressed';
@@ -532,7 +687,8 @@
     version: '1.1-all-window-states',
     initialized, scans, sent, pending: pending.length,
     foregroundSent, selectedChatSent, selfMessageSkipped, draftSkipped,
-    localSendSkipped,
+    localSendSkipped, outgoingWebSuppressed,
+    draftLabelSkipped, draftComposerSkipped, draftWebSuppressed,
     dockBadgeState, dockBadgeCount, dockRowsVisible, dockBadgeUpdates,
     unknownRowsBaselined, staleCandidatesBlocked,
     relativeTimeChangesBlocked, inlineTimestampsRemoved,

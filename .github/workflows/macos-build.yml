@@ -19,6 +19,7 @@ on:
       - feature/notification-event-freshness
       - feature/notification-center-history
       - feature/reels-default-browser
+      - feature/notification-relative-time-fix
   workflow_dispatch:
 
 concurrency:
