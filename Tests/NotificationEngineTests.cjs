@@ -15,6 +15,7 @@ let rows = [];
 let hidden = false;
 let focused = true;
 let currentPath = '/';
+let fakeNow = Date.now();
 const documentListeners = new Map();
 
 const observerRoot = {};
@@ -90,6 +91,7 @@ vm.runInNewContext(source, {
   getComputedStyle: () => ({ fontWeight: '400' }),
   setTimeout(callback) { timeouts.push(callback); },
   setInterval(callback) { intervals.push(callback); },
+  Date: { now: () => fakeNow },
   URL,
 });
 
@@ -491,5 +493,80 @@ mutationCallback();
 runTimers();
 assert.equal(received().length, countBeforeFallback + 2,
   'Different content, even with a time suffix, is a new preview');
+
+// Regression from real Mac rollback feedback (Nov 8): self-authored messages
+// can appear with no "You:" marker AFTER the original 12s fingerprint window.
+// Explicit Send intent must survive briefly and suppress repeat row rendering.
+currentPath = '/t/alice';
+hidden = false;
+focused = true;
+const sentBeforeDelay = received().length;
+composer = makeComposer('Đây là tin tôi gửi, không phải tin đến');
+emitDocument('input', { target: composer });
+emitDocument('keydown', { target: composer, key: 'Enter', shiftKey: false,
+  isComposing: false, metaKey: false, altKey: false, ctrlKey: false });
+fakeNow += 20000;
+rows = [row('/t/alice', 'Alice', 'Đây là tin tôi gửi, không phải tin đến', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, sentBeforeDelay,
+  'A genuinely sent local message must stay suppressed after the old 12-second window');
+assert.equal(window.__mnIsOwnSentNotification('Đây là tin tôi gửi, không phải tin đến', '/t/alice'), true,
+  'The independently emitted Web Notification must not forward the sent content to native');
+assert.equal(window.__mnIsOwnSentNotification('Người khác gửi tin thật', '/t/alice'), false,
+  'Web Notification for a different sender message must remain deliverable');
+assert.ok(window.__mnNotificationStatus().outgoingWebSuppressed >= 1);
+
+// A fresh inbound reply must not be suppressed by broad "window is focused"
+// heuristics. Returning to the old sent preview must also remain ignored
+// within the bounded send window.
+rows = [row('/t/alice', 'Alice', 'Người khác gửi tin thật', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, sentBeforeDelay + 1,
+  'Immediate real inbound reply must remain eligible');
+rows = [row('/t/alice', 'Alice', 'Đây là tin tôi gửi, không phải tin đến', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, sentBeforeDelay + 1,
+  'Messenger re-rendering an old own-send preview must not alert again');
+
+// A different chat must not be suppressed just because this user sent a
+// message elsewhere, and web notifications with no chat key may only be
+// matched while the originating conversation is open and very fresh.
+currentPath = '/t/bob';
+assert.equal(window.__mnIsOwnSentNotification('Đây là tin tôi gửi, không phải tin đến', ''), false,
+  'An unknown-thread Web Notification must not match another chat');
+rows = [row('/t/bob', 'Bob', 'Đây là tin tôi gửi, không phải tin đến', true)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, sentBeforeDelay + 2,
+  'Same text arriving in a different chat must still notify');
+currentPath = '/t/alice';
+fakeNow += 91000;
+rows = [row('/t/alice', 'Alice', 'Reply after send history expires', false)];
+mutationCallback();
+runTimers();
+const beforeExpiration = received().length;
+rows = [row('/t/alice', 'Alice', 'Đây là tin tôi gửi, không phải tin đến', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforeExpiration + 1,
+  'A genuinely repeated message outside the send fingerprint TTL must be deliverable');
+assert.equal(window.__mnIsOwnSentNotification('Đây là tin tôi gửi, không phải tin đến', '/t/alice'), false,
+  'Web send fingerprint must also expire');
+
+// Distinguish typed-but-unsent content from explicitly submitted content:
+// a draft fingerprint must not suppress an unrelated incoming message.
+composer = makeComposer('Tôi còn đang soạn');
+emitDocument('input', { target: composer });
+rows = [row('/t/alice', 'Alice', 'Người khác gửi thêm khi tôi đang soạn', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().at(-1).noiDung, 'Người khác gửi thêm khi tôi đang soạn');
+
+const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'main.swift'), 'utf8');
+assert.match(nativeSource, /window\.__mnIsOwnSentNotification\(this\.body, this\.tag\)/,
+  'Web Notification must call the same local-only outgoing evidence check');
 
 console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');
