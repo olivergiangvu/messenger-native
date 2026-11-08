@@ -229,21 +229,23 @@
     const path = /^\/t\/[^/]+/.test(tagPath) ? tagPath : selected;
     if (!/^\/t\/[^/]+/.test(path)) return false;
 
-    // Do not suppress generic Web Notifications merely for containing
-    // the word "Draft". Require exact evidence from an unsent local
-    // composer in this thread; unknown tags are restricted to the open
-    // conversation so unrelated inbound messages remain eligible.
+    const now = Date.now();
+    const maxAge = tagPath === path ? LOCAL_SENT_TTL_MS : 10000;
+    const sent = (recentLocalSends.get(path) || []).some(item =>
+      now - item.timestamp <= maxAge && matchesOutgoing(body, item.text)
+    );
+    if (sent) {
+      outgoingWebSuppressed += 1;
+      return true;
+    }
+    // The editor can still contain the sent text for a React render tick.
+    // Explicit Send evidence takes precedence over unsent composer state.
+    // Never suppress another chat's Web Notification by global focus alone.
     if (matchesUnsentDraft(path, body) && (tagPath === path || selected === path)) {
       draftWebSuppressed += 1;
       return true;
     }
-    const now = Date.now();
-    const maxAge = tagPath === path ? LOCAL_SENT_TTL_MS : 10000;
-    const matched = (recentLocalSends.get(path) || []).some(sent =>
-      now - sent.timestamp <= maxAge && matchesOutgoing(body, sent.text)
-    );
-    if (matched) outgoingWebSuppressed += 1;
-    return matched;
+    return false;
   };
 
   document.addEventListener('input', event => {
@@ -588,10 +590,13 @@
       const eligible = previewChanged;
       if (!old && item.unread) staleCandidatesBlocked += 1;
       // Do not consume a local-send fingerprint during a no-change scan.
-      const unsentDraft = eligible && !item.isDraft &&
-        matchesUnsentDraft(item.path, item.preview);
+      // A send can complete before React clears the contenteditable editor;
+      // it must be classified as sent, not as an unsent draft.
       const sentFromLocalComposer = eligible && !item.isDraft &&
-        !submittedLocalDraft && !unsentDraft && recentLocalMatch(item);
+        !submittedLocalDraft && recentLocalMatch(item);
+      const unsentDraft = eligible && !item.isDraft &&
+        !submittedLocalDraft && !sentFromLocalComposer &&
+        matchesUnsentDraft(item.path, item.preview);
       if (eligible && (item.unread || activeIncoming)) {
         if (item.isDraft) {
           // Explicit UI draft marker, never an inbound message.
