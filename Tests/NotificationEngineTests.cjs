@@ -569,4 +569,101 @@ const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'Ma nguon', 'mai
 assert.match(nativeSource, /window\.__mnIsOwnSentNotification\(this\.body, this\.tag\)/,
   'Web Notification must call the same local-only outgoing evidence check');
 
-console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts, emoji and previews passed.');
+// Regression (real Mac, 2026-11-08): Meta's sidebar may render a Draft
+// marker with middot, en dash or as a standalone line, not merely "Draft:".
+currentPath = '/t/alice';
+hidden = false;
+focused = true;
+document.activeElement = null;
+const beforeAlternateDrafts = received().length;
+for (const preview of [
+  'Draft · chỉ mới viết chứ chưa gửi',
+  'Nháp — nội dung đang soạn',
+  'Bản nháp – văn bản mới',
+  'Draft\nchưa nhấn Send',
+  'Nháp',
+  'Bản nháp: còn đang gõ'
+]) {
+  rows = [row('/t/alice', 'Alice', preview, false)];
+  mutationCallback();
+  runTimers();
+}
+assert.equal(received().length, beforeAlternateDrafts,
+  'Draft labels using new separators or split UI lines must never notify');
+assert.ok(window.__mnNotificationStatus().draftLabelSkipped >= 6,
+  'Diagnostics must count alternative draft-label suppressions without content');
+
+// A draft whose visible preview has no Draft: marker needs *live composer*
+// evidence, including beyond the old 12s fingerprint lifetime, before it
+// can be suppressed. No content leaves the JS page on this check.
+let textDraft = 'Tôi đang gõ nháp rất lâu nhưng chưa hề gửi';
+composer = makeComposer(textDraft);
+emitDocument('input', { target: composer });
+fakeNow += 20000;
+rows = [row('/t/alice', 'Alice', textDraft, false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforeAlternateDrafts,
+  'Unlabelled local draft after 20 seconds must NOT be treated as incoming');
+assert.ok(window.__mnNotificationStatus().draftComposerSkipped >= 1,
+  'The unsent-composer suppression must be distinguishable in Diagnostics');
+assert.equal(window.__mnIsOwnSentNotification(textDraft, '/t/alice'), true,
+  'A Web Notification echo containing the actual unsent draft must be blocked');
+assert.equal(window.__mnIsOwnSentNotification(textDraft, ''), true,
+  'Unknown-tag Web echo of the selected local draft must be blocked');
+assert.equal(window.__mnIsOwnSentNotification('Một người khác nhắn tin', '/t/alice'), false,
+  'Different inbound text must never be blocked by the local draft');
+assert.ok(window.__mnNotificationStatus().draftWebSuppressed >= 2,
+  'Web draft suppressions should be reported without draft content');
+
+// The user edits the same draft repeatedly. The old one-shot fingerprint
+// was consumed after one match; unsent drafts must remain suppressible.
+for (const suffix of [' (sửa)', ' (sửa tiếp)', ' (vẫn chưa gửi)']) {
+  textDraft += suffix;
+  composer.innerText = textDraft;
+  emitDocument('input', { target: composer });
+  rows = [row('/t/alice', 'Alice', textDraft, false)];
+  mutationCallback();
+  runTimers();
+}
+assert.equal(received().length, beforeAlternateDrafts,
+  'Each subsequent local-only draft change must remain silent');
+
+// A real message with a different body in the same selected chat still
+// deserves a notification even while the user is composing.
+rows = [row('/t/alice', 'Alice', 'Có tin đến thật trong khi đang soạn', false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforeAlternateDrafts + 1,
+  'A distinct actual incoming message must still be notified');
+
+// Same text in another thread is not evidence of a local draft there.
+rows = [row('/t/bob', 'Bob', textDraft, true)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforeAlternateDrafts + 2,
+  'Draft in chat A must not hide an incoming message in chat B');
+
+// Clearing the editor must immediately invalidate the stale unsent draft.
+currentPath = '/t/alice';
+composer.innerText = '';
+emitDocument('input', { target: composer });
+document.activeElement = null;
+rows = [row('/t/alice', 'Alice', textDraft, false)];
+mutationCallback();
+runTimers();
+assert.equal(received().length, beforeAlternateDrafts + 3,
+  'After a local draft is cleared, a real matching incoming preview is eligible');
+assert.equal(window.__mnIsOwnSentNotification(textDraft, '/t/alice'), false,
+  'A discarded draft must no longer suppress Web Notifications');
+
+// A persisted draft from a previous editor session can be used briefly
+// even while the user looks elsewhere, but must expire.
+composer = makeComposer('Nháp cũ ở hội thoại Alice');
+emitDocument('input', { target: composer });
+document.activeElement = null;
+fakeNow += 10 * 60 * 1000 + 1;
+assert.equal(window.__mnIsOwnSentNotification('Nháp cũ ở hội thoại Alice', '/t/alice'), false,
+  'Unsent composer evidence must expire and must not linger across sessions');
+
+console.log('Notification engine: focused/background messages, own Enter/click send suppression, inbound while composing, drafts and unlabeled live composers, emoji and previews passed.');
